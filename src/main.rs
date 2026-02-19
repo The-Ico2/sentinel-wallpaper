@@ -15,7 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::{
-	data_loaders::config::AddonConfig,
+	data_loaders::config::{AddonConfig, AddonSettings},
 	utility::{addon_root_dir, sentinel_addons_dir},
 	wallpaper_engine::WallpaperRuntime,
 };
@@ -29,17 +29,46 @@ fn ensure_config_exists() {
 		return;
 	}
 
-	let default_config = r#"update_check: true
-debug: false
-log_level: warn
+	let default_config = r#"settings:
+	performance:
+		pausing:
+			focus: "per-monitor"
+			maximized: "per-monitor"
+			fullscreen: "all-monitors"
+			check_interval_ms: 500
+		watcher:
+			enabled: true
+			interval_ms: 600
+		interactions:
+			send_move: true
+			send_click: true
+			poll_interval_ms: 8
+			move_threshold_px: 0.5
+		audio:
+			enabled: true
+			sample_interval_ms: 100
+			endpoint_refresh_ms: 1200
+			retry_interval_ms: 2000
+			change_threshold: 0.015
+			quantize_decimals: 2
+	runtime:
+		tick_sleep_ms: 8
+		reapply_on_pause_change: true
+	diagnostics:
+		log_pause_state_changes: true
+		log_watcher_reloads: true
+	development:
+		update_check: true
+		debug: false
+		log_level: warn
 
 wallpaper:
-  enabled: true
-  monitor_index:
-	- "*"
-  wallpaper_id: "sentinel.default.dark"
-  mode: "fill"
-  z_index: "desktop"
+	enabled: true
+	monitor_index:
+		- "*"
+	wallpaper_id: "sentinel.default.dark"
+	mode: "fill"
+	z_index: "desktop"
 "#;
 
 	if let Some(parent) = config_path.parent() {
@@ -85,6 +114,7 @@ fn main() -> windows::core::Result<()> {
 		update_check: true,
 		debug: false,
 		log_level: "warn".to_string(),
+		settings: AddonSettings::default(),
 		wallpapers: Vec::new(),
 	});
 
@@ -98,6 +128,7 @@ fn main() -> windows::core::Result<()> {
 
 	let mut runtime = WallpaperRuntime::new();
 	runtime.apply(&config);
+	let loop_sleep = Duration::from_millis(config.settings.runtime.tick_sleep_ms.max(1));
 
 	loop {
 		unsafe {
@@ -112,7 +143,7 @@ fn main() -> windows::core::Result<()> {
 		}
 
 		runtime.tick_interactions();
-		thread::sleep(Duration::from_millis(8));
+		thread::sleep(loop_sleep);
 	}
 }
 

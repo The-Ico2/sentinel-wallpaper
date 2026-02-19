@@ -1,6 +1,35 @@
-update_check: true
-debug: false
-log_level: warn
+settings:
+  performance:
+    pausing:
+      focus: "per-monitor"
+      maximized: "per-monitor"
+      fullscreen: "all-monitors"
+      check_interval_ms: 500
+    watcher:
+      enabled: true
+      interval_ms: 600
+    interactions:
+      send_move: true
+      send_click: true
+      poll_interval_ms: 8
+      move_threshold_px: 0.5
+    audio:
+      enabled: true
+      sample_interval_ms: 100
+      endpoint_refresh_ms: 1200
+      retry_interval_ms: 2000
+      change_threshold: 0.015
+      quantize_decimals: 2
+  runtime:
+    tick_sleep_ms: 8
+    reapply_on_pause_change: true
+  diagnostics:
+    log_pause_state_changes: true
+    log_watcher_reloads: true
+  development:
+    update_check: true
+    debug: false
+    log_level: warn
 
 wallpaper:
   enabled: true
