@@ -1,0 +1,26 @@
+update_check: true
+debug: false
+log_level: warn
+
+wallpaper:
+  enabled: true
+  monitor_index:
+    - "p"
+  wallpaper_id: "sentinel.default.light"
+
+wallpaper2:
+  enabled: true
+  monitor_index:
+    - "*"
+  # The wallpaper ID is the same name as the wallpaper folder in .Sentinel/Assets/wallpaper
+  wallpaper_id: "sentinel.default.dark"
+
+wallpaper3:
+  enabled: false
+  monitor_index:
+    - "p"
+    - "2"
+  # "fill" is default
+  mode: "fill"
+  # The wallpaper ID is the same name as the wallpaper folder in .Sentinel/Assets/wallpaper
+  wallpaper_id: "sentinel.default.hc"
