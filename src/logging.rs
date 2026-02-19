@@ -119,7 +119,7 @@ macro_rules! error {
 fn log_path() -> &'static PathBuf {
     LOG_PATH.get_or_init(|| {
         sentinel_root_dir()
-            .map(|p| p.join("sentinel.log"))
-            .unwrap_or_else(|| PathBuf::from("sentinel.log"))
+            .map(|p| p.join("sentinel.wallpaper.log"))
+            .unwrap_or_else(|| PathBuf::from("sentinel.wallpaper.log"))
     })
 }
