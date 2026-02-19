@@ -15,7 +15,10 @@ use windows::{
     Win32::{
         Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW},
-        Media::Audio::{eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator},
+        Media::Audio::{
+            eCommunications, eConsole, eMultimedia, eRender, IMMDeviceEnumerator,
+            MMDeviceEnumerator,
+        },
         Media::Audio::Endpoints::IAudioMeterInformation,
         System::{Com::*, LibraryLoader::GetModuleHandleW},
         UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
@@ -83,6 +86,8 @@ pub struct WallpaperRuntime {
     last_left_down: bool,
     audio_meter: Option<SystemAudioMeter>,
     last_audio_tick: Instant,
+    last_audio_retry: Instant,
+    last_audio_refresh: Instant,
 }
 
 impl WallpaperRuntime {
@@ -91,12 +96,26 @@ impl WallpaperRuntime {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
+
+        let audio_meter = match SystemAudioMeter::new() {
+            Ok(meter) => {
+                warn!("[WALLPAPER][AUDIO] System output meter initialized");
+                Some(meter)
+            }
+            Err(e) => {
+                warn!("[WALLPAPER][AUDIO] System output meter unavailable: {}", e);
+                None
+            }
+        };
+
         Self {
             hosted: Vec::new(),
             last_cursor: None,
             last_left_down: false,
-            audio_meter: SystemAudioMeter::new().ok(),
+            audio_meter,
             last_audio_tick: Instant::now(),
+            last_audio_retry: Instant::now(),
+            last_audio_refresh: Instant::now(),
         }
     }
 
@@ -105,6 +124,8 @@ impl WallpaperRuntime {
         self.last_cursor = None;
         self.last_left_down = false;
         self.last_audio_tick = Instant::now();
+        self.last_audio_retry = Instant::now();
+        self.last_audio_refresh = Instant::now();
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -304,11 +325,41 @@ impl WallpaperRuntime {
 
         if self.last_audio_tick.elapsed() >= Duration::from_millis(33) {
             self.last_audio_tick = Instant::now();
+
+            if self.last_audio_refresh.elapsed() >= Duration::from_millis(1200) {
+                self.last_audio_refresh = Instant::now();
+                if let Some(meter) = self.audio_meter.as_mut() {
+                    if let Err(e) = meter.refresh() {
+                        warn!("[WALLPAPER][AUDIO] Endpoint refresh failed: {}", e);
+                        self.audio_meter = None;
+                    }
+                }
+            }
+
+            if self.audio_meter.is_none() && self.last_audio_retry.elapsed() >= Duration::from_secs(2) {
+                self.last_audio_retry = Instant::now();
+                match SystemAudioMeter::new() {
+                    Ok(meter) => {
+                        warn!("[WALLPAPER][AUDIO] System output meter restored");
+                        self.audio_meter = Some(meter);
+                    }
+                    Err(e) => {
+                        warn!("[WALLPAPER][AUDIO] Retry failed: {}", e);
+                    }
+                }
+            }
+
             if let Some(meter) = self.audio_meter.as_mut() {
-                if let Ok(level) = meter.peak() {
-                    let payload = format!("{{\"type\":\"native_audio\",\"level\":{:.6}}}", level);
-                    for hosted in &self.hosted {
-                        let _ = post_webview_json(&hosted.webview, &payload);
+                match meter.peak() {
+                    Ok(level) => {
+                        let payload = format!("{{\"type\":\"native_audio\",\"level\":{:.6}}}", level);
+                        for hosted in &self.hosted {
+                            let _ = post_webview_json(&hosted.webview, &payload);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("[WALLPAPER][AUDIO] Peak read failed, resetting meter: {}", e);
+                        self.audio_meter = None;
                     }
                 }
             }
@@ -317,7 +368,8 @@ impl WallpaperRuntime {
 }
 
 struct SystemAudioMeter {
-    meter: IAudioMeterInformation,
+    enumerator: IMMDeviceEnumerator,
+    meters: Vec<IAudioMeterInformation>,
 }
 
 impl SystemAudioMeter {
@@ -326,25 +378,57 @@ impl SystemAudioMeter {
             let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .map_err(|e| format!("CoCreateInstance(MMDeviceEnumerator) failed: {e:?}"))?;
 
-            let device = enumerator
-                .GetDefaultAudioEndpoint(eRender, eMultimedia)
-                .map_err(|e| format!("GetDefaultAudioEndpoint failed: {e:?}"))?;
+            let mut meter = Self {
+                enumerator,
+                meters: Vec::new(),
+            };
+            meter.refresh()?;
+            Ok(meter)
+        }
+    }
 
-            let meter: IAudioMeterInformation = device
-                .Activate(CLSCTX_ALL, None)
-                .map_err(|e| format!("Activate(IAudioMeterInformation) failed: {e:?}"))?;
+    fn refresh(&mut self) -> std::result::Result<(), String> {
+        unsafe {
+            let mut meters = Vec::<IAudioMeterInformation>::new();
+            for role in [eConsole, eMultimedia, eCommunications] {
+                if let Ok(device) = self.enumerator.GetDefaultAudioEndpoint(eRender, role) {
+                    if let Ok(meter) = device.Activate::<IAudioMeterInformation>(CLSCTX_ALL, None) {
+                        meters.push(meter);
+                    }
+                }
+            }
 
-            Ok(Self { meter })
+            if meters.is_empty() {
+                return Err("No usable default render endpoint audio meters found".to_string());
+            }
+
+            self.meters = meters;
+            Ok(())
         }
     }
 
     fn peak(&self) -> std::result::Result<f32, String> {
         unsafe {
-            let peak = self
-                .meter
-                .GetPeakValue()
-                .map_err(|e| format!("IAudioMeterInformation::GetPeakValue failed: {e:?}"))?;
-            Ok(peak.clamp(0.0, 1.0))
+            let mut best = 0.0f32;
+            let mut had_success = false;
+
+            for meter in &self.meters {
+                match meter.GetPeakValue() {
+                    Ok(peak) => {
+                        had_success = true;
+                        if peak > best {
+                            best = peak;
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+
+            if !had_success {
+                return Err("All audio meter reads failed".to_string());
+            }
+
+            Ok(best.clamp(0.0, 1.0))
         }
     }
 }
