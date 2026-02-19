@@ -8,13 +8,21 @@ license = "UNLICENSED"
 publish = false
 
 [dependencies]
-windows = { version = "0.62.2", features = [
+windows = { version = "0.61.3", features = [
     "Win32",
     "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_LibraryLoader",
     "Win32_System_Pipes",
     "Win32_System_IO",
+    "Win32_System_Variant",
     "Win32_Storage_FileSystem",
     "Win32_Security",
 ] }
@@ -22,3 +30,4 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_yaml = "0.9.34"
 chrono = "0.4.43"
+webview2-com = "0.38.2"

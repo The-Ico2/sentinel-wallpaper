@@ -7,6 +7,12 @@ mod utility;
 mod wallpaper_engine;
 
 use std::{thread, time::Duration};
+use windows::Win32::UI::HiDpi::{
+	SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+	DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE, WM_QUIT,
+};
 
 use crate::{
 	data_loaders::config::AddonConfig,
@@ -58,7 +64,20 @@ fn addon_config_path() -> std::path::PathBuf {
 	std::path::PathBuf::from("config.yaml")
 }
 
+fn enable_per_monitor_dpi_awareness() {
+	unsafe {
+		if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_err() {
+			warn!(
+				"[{}] Failed to set process DPI awareness to PerMonitorV2; monitor sizes may be scaled",
+				DEBUG_NAME
+			);
+		}
+	}
+}
+
 fn main() -> windows::core::Result<()> {
+	enable_per_monitor_dpi_awareness();
+
 	ensure_config_exists();
 
 	let config_path = addon_config_path();
@@ -81,7 +100,19 @@ fn main() -> windows::core::Result<()> {
 	runtime.apply(&config);
 
 	loop {
-		thread::sleep(Duration::from_secs(30));
+		unsafe {
+			let mut msg = MSG::default();
+			while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+				if msg.message == WM_QUIT {
+					return Ok(());
+				}
+				let _ = TranslateMessage(&msg);
+				DispatchMessageW(&msg);
+			}
+		}
+
+		runtime.tick_interactions();
+		thread::sleep(Duration::from_millis(8));
 	}
 }
 

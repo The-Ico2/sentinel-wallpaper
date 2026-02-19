@@ -1,29 +1,34 @@
 use std::{
-    env,
     fs,
     mem,
     path::{Path, PathBuf},
-    process::{Child, Command},
-    thread,
+    ptr,
+    sync::{mpsc, OnceLock},
     time::{Duration, Instant},
 };
 
 use serde::Deserialize;
 use serde_json::Value;
+use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use windows::{
-    core::{BOOL, PCWSTR},
+    core::{w, BOOL, PCWSTR},
     Win32::{
-        Foundation::{HWND, LPARAM, RECT, WPARAM},
+        Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW},
+        Media::Audio::{eMultimedia, eRender, IMMDeviceEnumerator, MMDeviceEnumerator},
+        Media::Audio::Endpoints::IAudioMeterInformation,
+        System::{Com::*, LibraryLoader::GetModuleHandleW},
+        UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
         UI::WindowsAndMessaging::{
-            EnumWindows, FindWindowExW, FindWindowW, GetWindow, GetWindowLongW, GetWindowTextW,
-            GetWindowThreadProcessId, IsWindowVisible, SendMessageTimeoutW, SetParent, SetWindowLongW,
-            SetWindowPos, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOP,
-            HWND_TOPMOST, SMTO_NORMAL, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
-            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_SHOWWINDOW, SYSTEM_PARAMETERS_INFO_ACTION,
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME,
-            WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU,
-            WS_THICKFRAME, WS_VISIBLE, SystemParametersInfoW,
+            CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, FindWindowExW, FindWindowW,
+            GetCursorPos, GetWindowLongW, GetWindowRect, RegisterClassW, SendMessageTimeoutW,
+            SetWindowLongW,
+            SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
+            SMTO_NORMAL, SWP_FRAMECHANGED,
+            SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_EX_STYLE,
+            WINDOW_STYLE, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+            WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+            WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
         },
     },
 };
@@ -36,6 +41,8 @@ use crate::{
     warn,
 };
 
+const HOST_CLASS_NAME: PCWSTR = w!("SentinelWallpaperHostWindow");
+
 #[derive(Debug, Deserialize, Clone)]
 struct RegistryAsset {
     id: String,
@@ -43,8 +50,6 @@ struct RegistryAsset {
     category: String,
     #[serde(default)]
     metadata: Value,
-    #[serde(default)]
-    exe_path: String,
     #[serde(default)]
     path: PathBuf,
 }
@@ -56,16 +61,52 @@ struct MonitorArea {
     rect: RECT,
 }
 
+struct HostedWallpaper {
+    hwnd: HWND,
+    controller: ICoreWebView2Controller,
+    webview: ICoreWebView2,
+    monitor_rect: RECT,
+}
+
+impl Drop for HostedWallpaper {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = self.controller.Close();
+            let _ = DestroyWindow(self.hwnd);
+        }
+    }
+}
+
 pub struct WallpaperRuntime {
-    launched: Vec<Child>,
+    hosted: Vec<HostedWallpaper>,
+    last_cursor: Option<(i32, i32)>,
+    last_left_down: bool,
+    audio_meter: Option<SystemAudioMeter>,
+    last_audio_tick: Instant,
 }
 
 impl WallpaperRuntime {
     pub fn new() -> Self {
-        Self { launched: Vec::new() }
+        let _ = ensure_host_class();
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        }
+        Self {
+            hosted: Vec::new(),
+            last_cursor: None,
+            last_left_down: false,
+            audio_meter: SystemAudioMeter::new().ok(),
+            last_audio_tick: Instant::now(),
+        }
     }
 
     pub fn apply(&mut self, config: &AddonConfig) {
+        self.hosted.clear();
+        self.last_cursor = None;
+        self.last_left_down = false;
+        self.last_audio_tick = Instant::now();
+        warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
+
         if config.wallpapers.is_empty() {
             warn!("[WALLPAPER] No wallpaper sections found in config");
             return;
@@ -81,6 +122,12 @@ impl WallpaperRuntime {
             error!("[WALLPAPER] No monitors detected, aborting runtime apply");
             return;
         }
+        warn!(
+            "[WALLPAPER][APPLY] {} asset(s), {} monitor(s), {} enabled profile(s)",
+            assets.len(),
+            monitors.len(),
+            config.enabled_wallpapers().len()
+        );
 
         for profile in config.enabled_wallpapers() {
             self.launch_profile(profile, &assets, &monitors);
@@ -88,6 +135,14 @@ impl WallpaperRuntime {
     }
 
     fn launch_profile(&mut self, profile: &WallpaperConfig, assets: &[RegistryAsset], monitors: &[MonitorArea]) {
+        warn!(
+            "[WALLPAPER][PROFILE] section='{}' wallpaper_id='{}' monitor_index={:?} z_index='{}'",
+            profile.section,
+            profile.wallpaper_id,
+            profile.monitor_index,
+            profile.z_index
+        );
+
         let Some(asset) = resolve_asset(assets, &profile.wallpaper_id) else {
             warn!(
                 "[WALLPAPER] Section '{}' references missing wallpaper_id '{}'",
@@ -97,16 +152,19 @@ impl WallpaperRuntime {
             return;
         };
 
-        let launch_spec = match LaunchSpec::from_asset(asset) {
-            Some(v) => v,
-            None => {
-                warn!(
-                    "[WALLPAPER] Unable to build launch target from asset '{}'",
-                    asset.id
-                );
-                return;
-            }
+        let Some(url) = resolve_asset_url(asset) else {
+            warn!(
+                "[WALLPAPER] Asset '{}' has no 'url' and no local index.html",
+                asset.id
+            );
+            return;
         };
+
+        warn!(
+            "[WALLPAPER][PROFILE] asset='{}' resolved url='{}'",
+            asset.id,
+            url
+        );
 
         let targets = resolve_target_monitors(monitors, &profile.monitor_index);
         if targets.is_empty() {
@@ -118,10 +176,14 @@ impl WallpaperRuntime {
         }
 
         for monitor in targets {
-            match self.launch_into_monitor(&launch_spec, profile, monitor) {
-                Ok(()) => {}
+            match self.launch_into_monitor(profile, monitor, &url) {
+                Ok(()) => warn!(
+                    "[WALLPAPER] Embedded '{}' into desktop host on monitor {}",
+                    profile.wallpaper_id,
+                    monitor.index + 1,
+                ),
                 Err(e) => warn!(
-                    "[WALLPAPER] Failed to launch '{}' for monitor {}: {}",
+                    "[WALLPAPER] Failed to embed '{}' for monitor {}: {}",
                     profile.wallpaper_id,
                     monitor.index + 1,
                     e
@@ -132,233 +194,400 @@ impl WallpaperRuntime {
 
     fn launch_into_monitor(
         &mut self,
-        launch_spec: &LaunchSpec,
         profile: &WallpaperConfig,
         monitor: &MonitorArea,
-    ) -> Result<(), String> {
-        let child = launch_spec.spawn()?;
-        let pid = child.id();
-        let title_hint = launch_spec.window_title_hint();
-
-        let hwnd = wait_for_window(pid, title_hint, Duration::from_secs(8))
-            .or_else(|| title_hint.and_then(|t| wait_for_window_by_title(t, Duration::from_secs(8))))
-            .ok_or_else(|| {
-                if let Some(t) = title_hint {
-                    format!("No top-level window found for PID {} or title hint '{}'", pid, t)
-                } else {
-                    format!("No top-level window found for PID {}", pid)
-                }
-            })?;
-
-        apply_wallpaper_layer(hwnd, monitor.rect, &profile.z_index)?;
-
+        url: &str,
+    ) -> std::result::Result<(), String> {
         warn!(
-            "[WALLPAPER] Embedded '{}' (section '{}') on monitor {} with z_index='{}'",
-            profile.wallpaper_id,
-            profile.section,
+            "[WALLPAPER][EMBED] monitor={} primary={} rect=[l={},t={},r={},b={}]",
             monitor.index + 1,
+            monitor.primary,
+            monitor.rect.left,
+            monitor.rect.top,
+            monitor.rect.right,
+            monitor.rect.bottom
+        );
+
+        let desktop = ensure_desktop_host()
+            .ok_or_else(|| "Failed to locate WorkerW desktop host window".to_string())?;
+        warn!("[WALLPAPER][EMBED] parent desktop host resolved: {:?}", desktop);
+
+        let parent_rect = window_rect(desktop)
+            .ok_or_else(|| "Failed to read desktop host window rect".to_string())?;
+        warn!(
+            "[WALLPAPER][EMBED] parent rect=[l={},t={},r={},b={}]",
+            parent_rect.left,
+            parent_rect.top,
+            parent_rect.right,
+            parent_rect.bottom
+        );
+
+        let hwnd = create_desktop_child_window(desktop, parent_rect, monitor.rect)?;
+        warn!("[WALLPAPER][EMBED] desktop child created: {:?}", hwnd);
+
+        apply_host_style(hwnd, &profile.z_index)?;
+        warn!(
+            "[WALLPAPER][EMBED] host style applied: hwnd={:?} z_index='{}'",
+            hwnd,
             profile.z_index
         );
 
-        self.launched.push(child);
+        let controller = create_webview_controller(hwnd, monitor.rect, url)?;
+        warn!("[WALLPAPER][EMBED] WebView2 controller attached to hwnd={:?}", hwnd);
+
+        let webview = unsafe {
+            controller
+                .CoreWebView2()
+                .map_err(|e| format!("WebView2 CoreWebView2 unavailable: {e:?}"))?
+        };
+
+        self.hosted.push(HostedWallpaper {
+            hwnd,
+            controller,
+            webview,
+            monitor_rect: monitor.rect,
+        });
+        warn!("[WALLPAPER][EMBED] host committed into runtime state");
         Ok(())
     }
-}
 
-enum LaunchSpec {
-    Url {
-        url: String,
-        title_hint: Option<String>,
-    },
-    Command {
-        program: String,
-        args: Vec<String>,
-        title_hint: Option<String>,
-    },
-}
-
-impl LaunchSpec {
-    fn from_asset(asset: &RegistryAsset) -> Option<Self> {
-        let title_hint = metadata_string(&asset.metadata, "window_title")
-            .or_else(|| metadata_string(&asset.metadata, "title"));
-
-        if let Some(url) = metadata_string(&asset.metadata, "url") {
-            return Some(Self::Url { url, title_hint });
+    pub fn tick_interactions(&mut self) {
+        if self.hosted.is_empty() {
+            return;
         }
 
-        if let Some(command) = metadata_string(&asset.metadata, "command") {
-            let args = metadata_string_array(&asset.metadata, "args");
-            return Some(Self::Command {
-                program: command,
-                args,
-                title_hint,
-            });
-        }
-
-        if !asset.exe_path.is_empty() && !asset.exe_path.eq_ignore_ascii_case("NULL") {
-            let args = metadata_string_array(&asset.metadata, "args");
-            return Some(Self::Command {
-                program: asset.exe_path.clone(),
-                args,
-                title_hint,
-            });
-        }
-
-        let local_html = asset.path.join("index.html");
-        if local_html.exists() {
-            return Some(Self::Url {
-                url: path_to_file_url(&local_html),
-                title_hint,
-            });
-        }
-
-        None
-    }
-
-    fn spawn(&self) -> Result<Child, String> {
-        match self {
-            LaunchSpec::Url { url, title_hint } => spawn_web_wallpaper(url, title_hint.as_deref()),
-            LaunchSpec::Command { program, args, .. } => Command::new(program)
-                .args(args)
-                .spawn()
-                .map_err(|e| format!("failed to launch command '{program}': {e}")),
-        }
-    }
-
-    fn window_title_hint(&self) -> Option<&str> {
-        match self {
-            LaunchSpec::Url { title_hint, .. } => title_hint.as_deref(),
-            LaunchSpec::Command { title_hint, .. } => title_hint.as_deref(),
-        }
-    }
-}
-
-fn spawn_web_wallpaper(url: &str, title_hint: Option<&str>) -> Result<Child, String> {
-    if let Some(browser) = find_chromium_browser() {
-        let app_arg = format!("--app={url}");
-        match Command::new(&browser)
-            .arg("--new-window")
-            .arg(app_arg)
-            .spawn()
-        {
-            Ok(child) => {
-                warn!("[WALLPAPER] Launched web wallpaper host via {}", browser.display());
-                return Ok(child);
+        let mut point = POINT::default();
+        unsafe {
+            if GetCursorPos(&mut point).is_err() {
+                return;
             }
-            Err(e) => {
-                warn!(
-                    "[WALLPAPER] Chromium host launch failed '{}': {} (falling back to mshta)",
-                    browser.display(),
-                    e
-                );
+        }
+
+        let cursor = (point.x, point.y);
+        let left_down = unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 };
+        let moved = self.last_cursor.map(|p| p != cursor).unwrap_or(true);
+        let just_pressed = left_down && !self.last_left_down;
+
+        if moved || just_pressed {
+            for hosted in &self.hosted {
+                if !point_in_rect(cursor, hosted.monitor_rect) {
+                    continue;
+                }
+
+                let width = (hosted.monitor_rect.right - hosted.monitor_rect.left).max(1);
+                let height = (hosted.monitor_rect.bottom - hosted.monitor_rect.top).max(1);
+                let local_x = (cursor.0 - hosted.monitor_rect.left).clamp(0, width);
+                let local_y = (cursor.1 - hosted.monitor_rect.top).clamp(0, height);
+                let norm_x = local_x as f64 / width as f64;
+                let norm_y = local_y as f64 / height as f64;
+
+                if moved {
+                    let payload = format!(
+                        "{{\"type\":\"native_move\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
+                        local_x, local_y, norm_x, norm_y
+                    );
+                    let _ = post_webview_json(&hosted.webview, &payload);
+                }
+
+                if just_pressed {
+                    let payload = format!(
+                        "{{\"type\":\"native_click\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
+                        local_x, local_y, norm_x, norm_y
+                    );
+                    let _ = post_webview_json(&hosted.webview, &payload);
+                }
+            }
+        }
+
+        self.last_cursor = Some(cursor);
+        self.last_left_down = left_down;
+
+        if self.last_audio_tick.elapsed() >= Duration::from_millis(33) {
+            self.last_audio_tick = Instant::now();
+            if let Some(meter) = self.audio_meter.as_mut() {
+                if let Ok(level) = meter.peak() {
+                    let payload = format!("{{\"type\":\"native_audio\",\"level\":{:.6}}}", level);
+                    for hosted in &self.hosted {
+                        let _ = post_webview_json(&hosted.webview, &payload);
+                    }
+                }
             }
         }
     }
-
-    let hta_path = build_web_wallpaper_hta(url, title_hint)?;
-    if let Ok(child) = Command::new("mshta.exe").arg(&hta_path).spawn() {
-        warn!("[WALLPAPER] Launched web wallpaper host via mshta.exe fallback");
-        return Ok(child);
-    }
-
-    let windir = env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
-    let system_mshta = PathBuf::from(windir).join("System32").join("mshta.exe");
-
-    Command::new(&system_mshta)
-        .arg(&hta_path)
-        .spawn()
-        .map_err(|e| format!("failed to launch web wallpaper host via mshta.exe: {e}"))
 }
 
-fn find_chromium_browser() -> Option<PathBuf> {
-    if let Ok(local) = env::var("LOCALAPPDATA") {
-        let local = PathBuf::from(local);
-        let candidates = [
-            local.join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
-            local.join("Google").join("Chrome").join("Application").join("chrome.exe"),
-            local.join("BraveSoftware").join("Brave-Browser").join("Application").join("brave.exe"),
-        ];
+struct SystemAudioMeter {
+    meter: IAudioMeterInformation,
+}
 
-        for candidate in candidates {
-            if candidate.exists() {
-                return Some(candidate);
-            }
+impl SystemAudioMeter {
+    fn new() -> std::result::Result<Self, String> {
+        unsafe {
+            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|e| format!("CoCreateInstance(MMDeviceEnumerator) failed: {e:?}"))?;
+
+            let device = enumerator
+                .GetDefaultAudioEndpoint(eRender, eMultimedia)
+                .map_err(|e| format!("GetDefaultAudioEndpoint failed: {e:?}"))?;
+
+            let meter: IAudioMeterInformation = device
+                .Activate(CLSCTX_ALL, None)
+                .map_err(|e| format!("Activate(IAudioMeterInformation) failed: {e:?}"))?;
+
+            Ok(Self { meter })
         }
     }
 
-    for base in [env::var("ProgramFiles").ok(), env::var("ProgramFiles(x86)").ok()]
-        .into_iter()
-        .flatten()
-    {
-        let base = PathBuf::from(base);
-        let candidates = [
-            base.join("Microsoft").join("Edge").join("Application").join("msedge.exe"),
-            base.join("Google").join("Chrome").join("Application").join("chrome.exe"),
-            base.join("BraveSoftware").join("Brave-Browser").join("Application").join("brave.exe"),
-        ];
-
-        for candidate in candidates {
-            if candidate.exists() {
-                return Some(candidate);
-            }
+    fn peak(&self) -> std::result::Result<f32, String> {
+        unsafe {
+            let peak = self
+                .meter
+                .GetPeakValue()
+                .map_err(|e| format!("IAudioMeterInformation::GetPeakValue failed: {e:?}"))?;
+            Ok(peak.clamp(0.0, 1.0))
         }
     }
-
-    None
 }
 
-fn build_web_wallpaper_hta(url: &str, title_hint: Option<&str>) -> Result<PathBuf, String> {
-    let mut dir = env::temp_dir();
-    dir.push("sentinel-wallpaper");
-    fs::create_dir_all(&dir)
-        .map_err(|e| format!("failed to create temp wallpaper host dir: {e}"))?;
+fn point_in_rect(point: (i32, i32), rect: RECT) -> bool {
+    point.0 >= rect.left && point.0 < rect.right && point.1 >= rect.top && point.1 < rect.bottom
+}
 
-    let file_name = format!("{}.hta", sanitize_file_name(title_hint.unwrap_or("sentinel-wallpaper")));
-    let path = dir.join(file_name);
+fn post_webview_json(webview: &ICoreWebView2, payload: &str) -> std::result::Result<(), String> {
+    let payload_wide = to_wstring(payload);
+    unsafe {
+        webview
+            .PostWebMessageAsJson(PCWSTR(payload_wide.as_ptr()))
+            .map_err(|e| format!("WebView2 PostWebMessageAsJson failed: {e:?}"))
+    }
+}
 
-    let title = escape_html(title_hint.unwrap_or("Sentinel Wallpaper"));
-    let page_url = escape_html(url);
+fn ensure_host_class() -> std::result::Result<(), String> {
+    static CLASS_ONCE: OnceLock<bool> = OnceLock::new();
+    if CLASS_ONCE.get().is_some() {
+        return Ok(());
+    }
 
-    let contents = format!(
-        "<html><head><meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\" />\
-<title>{}</title>\
-<hta:application id=\"sentinel\" border=\"none\" caption=\"no\" showInTaskBar=\"no\" sysMenu=\"no\"\
- windowState=\"maximize\" maximizeButton=\"no\" minimizeButton=\"no\" scroll=\"no\" />\
-<style>html,body{{margin:0;width:100%;height:100%;overflow:hidden;background:#000}}\
-iframe{{border:0;width:100%;height:100%}}</style></head>\
-<body><iframe src=\"{}\"></iframe></body></html>",
-        title, page_url
+    let hinstance = unsafe {
+        GetModuleHandleW(None)
+            .map(|h| HINSTANCE(h.0))
+            .map_err(|e| format!("GetModuleHandleW failed: {e:?}"))?
+    };
+
+    let wc = WNDCLASSW {
+        lpfnWndProc: Some(host_window_proc),
+        hInstance: hinstance,
+        lpszClassName: HOST_CLASS_NAME,
+        ..Default::default()
+    };
+
+    unsafe {
+        let _ = RegisterClassW(&wc);
+    }
+
+    let _ = CLASS_ONCE.set(true);
+    Ok(())
+}
+
+unsafe extern "system" fn host_window_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    DefWindowProcW(hwnd, msg, wparam, lparam)
+}
+
+fn create_desktop_child_window(worker: HWND, parent_rect: RECT, rect: RECT) -> std::result::Result<HWND, String> {
+    let x = rect.left - parent_rect.left;
+    let y = rect.top - parent_rect.top;
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    warn!(
+        "[WALLPAPER][HOST] creating child window parent={:?} pos=({}, {}) size={}x{}",
+        worker,
+        x,
+        y,
+        width,
+        height
     );
 
-    fs::write(&path, contents)
-        .map_err(|e| format!("failed to write temp wallpaper host file: {e}"))?;
+    let style = WINDOW_STYLE((WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN).0);
+    let ex_style = WINDOW_EX_STYLE((WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE).0);
 
-    Ok(path)
+    let hinstance = unsafe {
+        GetModuleHandleW(None)
+            .map(|h| HINSTANCE(h.0))
+            .map_err(|e| format!("GetModuleHandleW failed: {e:?}"))?
+    };
+
+    let hwnd = unsafe {
+        CreateWindowExW(
+            ex_style,
+            HOST_CLASS_NAME,
+            PCWSTR::null(),
+            style,
+            x,
+            y,
+            width,
+            height,
+            Some(worker),
+            None,
+            Some(hinstance),
+            Some(ptr::null()),
+        )
+    }
+    .map_err(|e| format!("CreateWindowExW failed: {e:?}"))?;
+
+    Ok(hwnd)
 }
 
-fn sanitize_file_name(value: &str) -> String {
-    let mut out = String::new();
-    for c in value.chars() {
-        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-            out.push(c);
+fn window_rect(hwnd: HWND) -> Option<RECT> {
+    unsafe {
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_ok() {
+            Some(rect)
         } else {
-            out.push('_');
+            None
+        }
+    }
+}
+
+fn apply_host_style(hwnd: HWND, z_index: &str) -> std::result::Result<(), String> {
+    unsafe {
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let mut new_style = style
+            & !(WS_CAPTION.0 | WS_THICKFRAME.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0 | WS_SYSMENU.0);
+        new_style |= WS_VISIBLE.0 | WS_CHILD.0;
+        let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
+
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        let mut new_ex = ex_style & !(WS_EX_APPWINDOW.0 | WS_EX_WINDOWEDGE.0 | WS_EX_DLGMODALFRAME.0);
+        new_ex |= WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0;
+        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex as i32);
+
+        let insert_after = match z_index.to_lowercase().as_str() {
+            "desktop" => HWND_TOPMOST,
+            "bottom" => HWND_BOTTOM,
+            "normal" => HWND_NOTOPMOST,
+            "top" => HWND_TOP,
+            "topmost" | "overlay" => HWND_TOPMOST,
+            _ => HWND_BOTTOM,
+        };
+        warn!(
+            "[WALLPAPER][STYLE] hwnd={:?} old_style=0x{:X} new_style=0x{:X} old_ex=0x{:X} new_ex=0x{:X}",
+            hwnd,
+            style,
+            new_style,
+            ex_style,
+            new_ex
+        );
+        warn!("[WALLPAPER][STYLE] insert_after={:?}", insert_after);
+
+        if SetWindowPos(
+            hwnd,
+            Some(insert_after),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+        )
+        .is_err()
+        {
+            return Err("SetWindowPos failed for host style".to_string());
         }
     }
 
-    if out.is_empty() {
-        "sentinel_wallpaper".to_string()
-    } else {
-        out
-    }
+    Ok(())
 }
 
-fn escape_html(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+fn create_webview_controller(
+    hwnd: HWND,
+    rect: RECT,
+    url: &str,
+) -> std::result::Result<ICoreWebView2Controller, String> {
+    warn!("[WALLPAPER][WEBVIEW] creating environment for hwnd={:?}", hwnd);
+    let environment = {
+        let (tx, rx) = mpsc::channel();
+
+        webview2_com::CreateCoreWebView2EnvironmentCompletedHandler::wait_for_async_operation(
+            Box::new(|handler| unsafe {
+                CreateCoreWebView2Environment(&handler).map_err(webview2_com::Error::WindowsError)
+            }),
+            Box::new(move |error_code, environment| {
+                error_code?;
+                tx.send(environment.ok_or_else(|| windows::core::Error::from(E_POINTER)))
+                    .expect("send WebView2 environment");
+                Ok(())
+            }),
+        )
+        .map_err(|e| format!("CreateCoreWebView2Environment failed: {e:?}"))?;
+
+        rx.recv()
+            .map_err(|_| "Failed to receive WebView2 environment".to_string())?
+            .map_err(|e| format!("WebView2 environment unavailable: {e:?}"))?
+    };
+    warn!("[WALLPAPER][WEBVIEW] environment ready for hwnd={:?}", hwnd);
+
+    let controller = {
+        let (tx, rx) = mpsc::channel();
+
+        webview2_com::CreateCoreWebView2ControllerCompletedHandler::wait_for_async_operation(
+            Box::new(move |handler| unsafe {
+                environment
+                    .CreateCoreWebView2Controller(hwnd, &handler)
+                    .map_err(webview2_com::Error::WindowsError)
+            }),
+            Box::new(move |error_code, controller| {
+                error_code?;
+                tx.send(controller.ok_or_else(|| windows::core::Error::from(E_POINTER)))
+                    .expect("send WebView2 controller");
+                Ok(())
+            }),
+        )
+        .map_err(|e| format!("CreateCoreWebView2Controller failed: {e:?}"))?;
+
+        rx.recv()
+            .map_err(|_| "Failed to receive WebView2 controller".to_string())?
+            .map_err(|e| format!("WebView2 controller unavailable: {e:?}"))?
+    };
+    warn!("[WALLPAPER][WEBVIEW] controller ready for hwnd={:?}", hwnd);
+
+    unsafe {
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        warn!(
+            "[WALLPAPER][WEBVIEW] setting bounds {}x{} and navigating to '{}'",
+            width,
+            height,
+            url
+        );
+        controller
+            .SetBounds(RECT {
+                left: 0,
+                top: 0,
+                right: width,
+                bottom: height,
+            })
+            .map_err(|e| format!("WebView2 SetBounds failed: {e:?}"))?;
+
+        controller
+            .SetIsVisible(true)
+            .map_err(|e| format!("WebView2 SetIsVisible failed: {e:?}"))?;
+
+        let webview = controller
+            .CoreWebView2()
+            .map_err(|e| format!("WebView2 CoreWebView2 unavailable: {e:?}"))?;
+
+        let url_wide = to_wstring(url);
+        webview
+            .Navigate(PCWSTR(url_wide.as_ptr()))
+            .map_err(|e| format!("WebView2 Navigate failed for '{}': {e:?}", url))?;
+    }
+    warn!("[WALLPAPER][WEBVIEW] navigation submitted successfully");
+
+    Ok(controller)
 }
 
 fn fetch_wallpaper_assets() -> Vec<RegistryAsset> {
@@ -429,17 +658,10 @@ fn fetch_local_wallpaper_assets() -> Vec<RegistryAsset> {
             continue;
         };
 
-        let exe_path = metadata
-            .get("exe_path")
-            .and_then(|v| v.as_str())
-            .unwrap_or("NULL")
-            .to_string();
-
         results.push(RegistryAsset {
             id,
             category: "wallpaper".to_string(),
             metadata,
-            exe_path,
             path: dir,
         });
     }
@@ -449,6 +671,19 @@ fn fetch_local_wallpaper_assets() -> Vec<RegistryAsset> {
 
 fn resolve_asset<'a>(assets: &'a [RegistryAsset], wallpaper_id: &str) -> Option<&'a RegistryAsset> {
     assets.iter().find(|a| a.id == wallpaper_id)
+}
+
+fn resolve_asset_url(asset: &RegistryAsset) -> Option<String> {
+    if let Some(url) = asset.metadata.get("url").and_then(|v| v.as_str()) {
+        return Some(url.to_string());
+    }
+
+    let local_html = asset.path.join("index.html");
+    if local_html.exists() {
+        return Some(path_to_file_url(&local_html));
+    }
+
+    None
 }
 
 fn resolve_target_monitors<'a>(monitors: &'a [MonitorArea], keys: &[String]) -> Vec<&'a MonitorArea> {
@@ -481,148 +716,9 @@ fn resolve_target_monitors<'a>(monitors: &'a [MonitorArea], keys: &[String]) -> 
     result
 }
 
-fn metadata_string(metadata: &Value, key: &str) -> Option<String> {
-    metadata.get(key)?.as_str().map(|s| s.to_string())
-}
-
-fn metadata_string_array(metadata: &Value, key: &str) -> Vec<String> {
-    metadata
-        .get(key)
-        .and_then(|v| v.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default()
-}
-
 fn path_to_file_url(path: &Path) -> String {
     let normalized = path.to_string_lossy().replace('\\', "/");
     format!("file:///{normalized}")
-}
-
-fn wait_for_window(pid: u32, title_hint: Option<&str>, timeout: Duration) -> Option<HWND> {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if let Some(hwnd) = find_top_level_window_for_pid(pid, title_hint) {
-            return Some(hwnd);
-        }
-        thread::sleep(Duration::from_millis(150));
-    }
-    None
-}
-
-fn wait_for_window_by_title(title_hint: &str, timeout: Duration) -> Option<HWND> {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if let Some(hwnd) = find_top_level_window_by_title(title_hint) {
-            return Some(hwnd);
-        }
-        thread::sleep(Duration::from_millis(150));
-    }
-    None
-}
-
-fn find_top_level_window_for_pid(pid: u32, title_hint: Option<&str>) -> Option<HWND> {
-    #[derive(Default)]
-    struct SearchState {
-        pid: u32,
-        title_hint: Option<String>,
-        found: Option<HWND>,
-    }
-
-    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let state = &mut *(lparam.0 as *mut SearchState);
-
-        let mut window_pid = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
-        if window_pid != state.pid {
-            return BOOL(1);
-        }
-
-        if !IsWindowVisible(hwnd).as_bool() {
-            return BOOL(1);
-        }
-
-        if GetWindow(hwnd, GW_OWNER).map(|v| v.0).unwrap_or_default() != std::ptr::null_mut() {
-            return BOOL(1);
-        }
-
-        if let Some(ref hint) = state.title_hint {
-            let mut title_buf = [0u16; 512];
-            let len = GetWindowTextW(hwnd, &mut title_buf);
-            if len <= 0 {
-                return BOOL(1);
-            }
-
-            let title = String::from_utf16_lossy(&title_buf[..len as usize]);
-            if !title.to_lowercase().contains(&hint.to_lowercase()) {
-                return BOOL(1);
-            }
-        }
-
-        state.found = Some(hwnd);
-        BOOL(0)
-    }
-
-    let mut state = SearchState {
-        pid,
-        title_hint: title_hint.map(|s| s.to_string()),
-        found: None,
-    };
-
-    unsafe {
-        let _ = EnumWindows(Some(enum_proc), LPARAM((&mut state as *mut SearchState) as isize));
-    }
-
-    state.found
-}
-
-fn find_top_level_window_by_title(title_hint: &str) -> Option<HWND> {
-    #[derive(Default)]
-    struct SearchState {
-        title_hint: String,
-        found: Option<HWND>,
-    }
-
-    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let state = &mut *(lparam.0 as *mut SearchState);
-
-        if !IsWindowVisible(hwnd).as_bool() {
-            return BOOL(1);
-        }
-
-        if GetWindow(hwnd, GW_OWNER).map(|v| v.0).unwrap_or_default() != std::ptr::null_mut() {
-            return BOOL(1);
-        }
-
-        let mut title_buf = [0u16; 512];
-        let len = GetWindowTextW(hwnd, &mut title_buf);
-        if len <= 0 {
-            return BOOL(1);
-        }
-
-        let title = String::from_utf16_lossy(&title_buf[..len as usize]);
-        if title.to_lowercase().contains(&state.title_hint.to_lowercase()) {
-            state.found = Some(hwnd);
-            return BOOL(0);
-        }
-
-        BOOL(1)
-    }
-
-    let mut state = SearchState {
-        title_hint: title_hint.to_string(),
-        found: None,
-    };
-
-    unsafe {
-        let _ = EnumWindows(Some(enum_proc), LPARAM((&mut state as *mut SearchState) as isize));
-    }
-
-    state.found
 }
 
 fn enumerate_monitors() -> Vec<MonitorArea> {
@@ -661,96 +757,12 @@ fn enumerate_monitors() -> Vec<MonitorArea> {
     monitors
 }
 
-fn apply_wallpaper_layer(hwnd: HWND, rect: RECT, z_index: &str) -> Result<(), String> {
-    let layer = LayerMode::from_config(z_index);
-
-    if layer == LayerMode::Desktop {
-        let worker = ensure_workerw()
-            .ok_or_else(|| "Failed to locate WorkerW desktop host window".to_string())?;
-        unsafe {
-            let _ = SetParent(hwnd, Some(worker));
-        }
-    }
-
+fn ensure_desktop_host() -> Option<HWND> {
     unsafe {
-        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
-        let mut new_style = style
-            & !(WS_CAPTION.0
-                | WS_THICKFRAME.0
-                | WS_MINIMIZEBOX.0
-                | WS_MAXIMIZEBOX.0
-                | WS_SYSMENU.0);
-        new_style |= WS_VISIBLE.0;
-        let _ = SetWindowLongW(hwnd, GWL_STYLE, new_style as i32);
+        let progman = FindWindowW(w!("Progman"), None).ok()?;
+        warn!("[WALLPAPER][HOSTSEL] Progman={:?}", progman);
 
-        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-        let mut new_ex = ex_style & !(WS_EX_APPWINDOW.0 | WS_EX_WINDOWEDGE.0 | WS_EX_DLGMODALFRAME.0);
-        if layer == LayerMode::Overlay {
-            new_ex |= WS_EX_TOOLWINDOW.0;
-        }
-        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex as i32);
-
-        let insert_after = layer.insert_after();
-        let width = rect.right - rect.left;
-        let height = rect.bottom - rect.top;
-
-        if SetWindowPos(
-            hwnd,
-            Some(insert_after),
-            rect.left,
-            rect.top,
-            width,
-            height,
-            SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
-        )
-        .is_err()
-        {
-            return Err("SetWindowPos failed while embedding wallpaper window".to_string());
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-enum LayerMode {
-    Desktop,
-    Bottom,
-    Normal,
-    Top,
-    TopMost,
-    Overlay,
-}
-
-impl LayerMode {
-    fn from_config(value: &str) -> Self {
-        match value.to_lowercase().as_str() {
-            "bottom" => Self::Bottom,
-            "normal" => Self::Normal,
-            "top" => Self::Top,
-            "topmost" => Self::TopMost,
-            "overlay" => Self::Overlay,
-            _ => Self::Desktop,
-        }
-    }
-
-    fn insert_after(self) -> HWND {
-        match self {
-            LayerMode::Desktop => HWND_BOTTOM,
-            LayerMode::Bottom => HWND_BOTTOM,
-            LayerMode::Normal => HWND_NOTOPMOST,
-            LayerMode::Top => HWND_TOP,
-            LayerMode::TopMost => HWND_TOPMOST,
-            LayerMode::Overlay => HWND_TOPMOST,
-        }
-    }
-}
-
-fn ensure_workerw() -> Option<HWND> {
-    unsafe {
-        let progman = FindWindowW(PCWSTR(to_wstring("Progman").as_ptr()), None).ok()?;
-
-        let mut result = 0usize;
+        let mut spawn_result = 0usize;
         let _ = SendMessageTimeoutW(
             progman,
             0x052C,
@@ -758,71 +770,46 @@ fn ensure_workerw() -> Option<HWND> {
             LPARAM(0),
             SMTO_NORMAL,
             1000,
-            Some(&mut result),
+            Some(&mut spawn_result),
         );
 
-        #[derive(Default)]
-        struct WorkerSearch {
-            worker: Option<HWND>,
-        }
-
+        let mut defview_host: Option<HWND> = None;
         unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-            let state = &mut *(lparam.0 as *mut WorkerSearch);
-
-            let shell = FindWindowExW(
-                Some(hwnd),
-                None,
-                PCWSTR(to_wstring("SHELLDLL_DefView").as_ptr()),
-                None,
-            )
-            .ok();
-
-            if shell.is_some() {
-                let worker = FindWindowExW(
-                    None,
-                    Some(hwnd),
-                    PCWSTR(to_wstring("WorkerW").as_ptr()),
-                    None,
-                )
-                .ok();
-
-                if let Some(worker) = worker {
-                    state.worker = Some(worker);
-                    return BOOL(0);
-                }
+            let out = (lparam.0 as *mut Option<HWND>).as_mut().unwrap();
+            if FindWindowExW(Some(hwnd), None, w!("SHELLDLL_DefView"), None).ok().is_some() {
+                *out = Some(hwnd);
+                return BOOL(0);
             }
-
             BOOL(1)
         }
-
-        let mut state = WorkerSearch::default();
         let _ = EnumWindows(
             Some(enum_proc),
-            LPARAM((&mut state as *mut WorkerSearch) as isize),
+            LPARAM((&mut defview_host) as *mut Option<HWND> as isize),
         );
 
-        if state.worker.is_some() {
-            return state.worker;
+        if let Some(host) = defview_host {
+            warn!("[WALLPAPER][HOSTSEL] DefView host={:?}", host);
+
+            if let Some(workerw) = FindWindowExW(None, Some(host), w!("WorkerW"), None).ok() {
+                warn!("[WALLPAPER][HOSTSEL] WorkerW sibling selected={:?}", workerw);
+                return Some(workerw);
+            }
+
+            if let Some(workerw) = FindWindowExW(Some(progman), None, w!("WorkerW"), None).ok() {
+                warn!("[WALLPAPER][HOSTSEL] WorkerW under Progman selected={:?}", workerw);
+                return Some(workerw);
+            }
+
+            warn!("[WALLPAPER][HOSTSEL] No WorkerW found; using DefView host as fallback");
+            return Some(host);
         }
 
-        FindWindowExW(
-            Some(progman),
-            None,
-            PCWSTR(to_wstring("WorkerW").as_ptr()),
-            None,
-        )
-        .ok()
-    }
-}
+        if let Some(workerw) = FindWindowExW(Some(progman), None, w!("WorkerW"), None).ok() {
+            warn!("[WALLPAPER][HOSTSEL] Fallback WorkerW selected={:?}", workerw);
+            return Some(workerw);
+        }
 
-pub fn set_static_wallpaper(path: &Path) {
-    let mut wide = to_wstring(path.to_string_lossy().as_ref());
-    unsafe {
-        let _ = SystemParametersInfoW(
-            SYSTEM_PARAMETERS_INFO_ACTION(SPI_SETDESKWALLPAPER.0),
-            0,
-            Some(wide.as_mut_ptr() as _),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(SPIF_UPDATEINIFILE.0 | SPIF_SENDCHANGE.0),
-        );
+        warn!("[WALLPAPER][HOSTSEL] Final fallback to Progman");
+        Some(progman)
     }
 }
