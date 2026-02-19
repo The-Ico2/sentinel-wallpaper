@@ -88,6 +88,8 @@ pub struct WallpaperRuntime {
     last_audio_tick: Instant,
     last_audio_retry: Instant,
     last_audio_refresh: Instant,
+    last_registry_tick: Instant,
+    last_registry_payload: Option<String>,
 }
 
 impl WallpaperRuntime {
@@ -116,6 +118,8 @@ impl WallpaperRuntime {
             last_audio_tick: Instant::now(),
             last_audio_retry: Instant::now(),
             last_audio_refresh: Instant::now(),
+            last_registry_tick: Instant::now(),
+            last_registry_payload: None,
         }
     }
 
@@ -126,6 +130,8 @@ impl WallpaperRuntime {
         self.last_audio_tick = Instant::now();
         self.last_audio_retry = Instant::now();
         self.last_audio_refresh = Instant::now();
+        self.last_registry_tick = Instant::now();
+        self.last_registry_payload = None;
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -364,7 +370,43 @@ impl WallpaperRuntime {
                 }
             }
         }
+
+        if self.last_registry_tick.elapsed() >= Duration::from_millis(250) {
+            self.last_registry_tick = Instant::now();
+
+            if let Some(payload) = build_registry_payload_json() {
+                let should_send = self
+                    .last_registry_payload
+                    .as_ref()
+                    .map(|prev| prev != &payload)
+                    .unwrap_or(true);
+
+                if should_send {
+                    self.last_registry_payload = Some(payload.clone());
+                    for hosted in &self.hosted {
+                        let _ = post_webview_json(&hosted.webview, &payload);
+                    }
+                }
+            }
+        }
     }
+}
+
+fn build_registry_payload_json() -> Option<String> {
+    let sysdata_raw = request("registry", "list_sysdata", None)?;
+    let appdata_raw = request("registry", "list_appdata", None)?;
+
+    let sysdata = serde_json::from_str::<Value>(&sysdata_raw).unwrap_or(Value::Null);
+    let appdata = serde_json::from_str::<Value>(&appdata_raw).unwrap_or(Value::Null);
+
+    Some(
+        serde_json::json!({
+            "type": "native_registry",
+            "sysdata": sysdata,
+            "appdata": appdata,
+        })
+        .to_string(),
+    )
 }
 
 struct SystemAudioMeter {
