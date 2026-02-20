@@ -84,6 +84,7 @@ pub struct WallpaperConfig {
     pub section: String,
     pub enabled: bool,
     pub monitor_index: Vec<String>,
+    pub mode: String,
     pub z_index: String,
     pub wallpaper_id: String,
     pub pause_focus_mode: PauseMode,
@@ -245,58 +246,95 @@ impl AddonConfig {
 }
 
 fn parse_wallpaper_sections(map: &Mapping, settings: &AddonSettings) -> Vec<WallpaperConfig> {
-    map.iter()
-        .filter_map(|(k, v)| {
-            let section = k.as_str()?;
+    let mut wallpapers = Vec::<WallpaperConfig>::new();
+
+    for (k, v) in map.iter() {
+        let Some(section) = k.as_str() else {
+            continue;
+        };
+
+        if !section.starts_with("wallpaper") {
+            continue;
+        }
+
+        if let Some(section_map) = v.as_mapping() {
+            if let Some(parsed) = parse_wallpaper_section(section, section_map, settings) {
+                wallpapers.push(parsed);
+            }
+        }
+    }
+
+    if let Some(wallpapers_map) = mapping_at(map, "wallpapers") {
+        for (k, v) in wallpapers_map.iter() {
+            let Some(section) = k.as_str() else {
+                continue;
+            };
+
             if !section.starts_with("wallpaper") {
-                return None;
+                continue;
             }
 
-            let section_map = v.as_mapping()?;
-            let wallpaper_id = str_at(section_map, "wallpaper_id")?.trim().to_string();
-            if wallpaper_id.is_empty() {
-                return None;
+            if let Some(section_map) = v.as_mapping() {
+                if let Some(parsed) = parse_wallpaper_section(section, section_map, settings) {
+                    wallpapers.push(parsed);
+                }
             }
+        }
+    }
 
-            let enabled = bool_at(section_map, "enabled").unwrap_or(true);
-            let monitor_index = string_list_at(section_map, "monitor_index").unwrap_or_else(|| vec!["*".to_string()]);
-            let z_index = str_at(section_map, "z_index").unwrap_or("desktop").to_lowercase();
+    wallpapers
+}
 
-            let legacy_focus = bool_at(section_map, "pause_on_focus").map(PauseMode::from_legacy_bool);
-            let legacy_maximized = bool_at(section_map, "pause_on_maximized").map(PauseMode::from_legacy_bool);
-            let legacy_fullscreen = bool_at(section_map, "pause_on_fullscreen").map(PauseMode::from_legacy_bool);
+fn parse_wallpaper_section(
+    section: &str,
+    section_map: &Mapping,
+    settings: &AddonSettings,
+) -> Option<WallpaperConfig> {
+    let wallpaper_id = str_at(section_map, "wallpaper_id")?.trim().to_string();
+    if wallpaper_id.is_empty() {
+        return None;
+    }
 
-            let pause_focus_mode = pause_mode_at(section_map, "pause_focus")
-                .or_else(|| pause_mode_in_pausing(section_map, "focus"))
-                .or(legacy_focus)
-                .unwrap_or(settings.performance.pausing.focus);
+    let enabled = bool_at(section_map, "enabled").unwrap_or(true);
+    let monitor_index =
+        string_list_at(section_map, "monitor_index").unwrap_or_else(|| vec!["*".to_string()]);
+    let mode = str_at(section_map, "mode").unwrap_or("fill").to_lowercase();
+    let z_index = str_at(section_map, "z_index").unwrap_or("desktop").to_lowercase();
 
-            let pause_maximized_mode = pause_mode_at(section_map, "pause_maximized")
-                .or_else(|| pause_mode_in_pausing(section_map, "maximized"))
-                .or(legacy_maximized)
-                .unwrap_or(settings.performance.pausing.maximized);
+    let legacy_focus = bool_at(section_map, "pause_on_focus").map(PauseMode::from_legacy_bool);
+    let legacy_maximized = bool_at(section_map, "pause_on_maximized").map(PauseMode::from_legacy_bool);
+    let legacy_fullscreen = bool_at(section_map, "pause_on_fullscreen").map(PauseMode::from_legacy_bool);
 
-            let mut pause_fullscreen_mode = pause_mode_at(section_map, "pause_fullscreen")
-                .or_else(|| pause_mode_in_pausing(section_map, "fullscreen"))
-                .or(legacy_fullscreen)
-                .unwrap_or(settings.performance.pausing.fullscreen);
+    let pause_focus_mode = pause_mode_at(section_map, "pause_focus")
+        .or_else(|| pause_mode_in_pausing(section_map, "focus"))
+        .or(legacy_focus)
+        .unwrap_or(settings.performance.pausing.focus);
 
-            if bool_at(section_map, "pause_fullscreen_all_monitors").unwrap_or(false) {
-                pause_fullscreen_mode = PauseMode::AllMonitors;
-            }
+    let pause_maximized_mode = pause_mode_at(section_map, "pause_maximized")
+        .or_else(|| pause_mode_in_pausing(section_map, "maximized"))
+        .or(legacy_maximized)
+        .unwrap_or(settings.performance.pausing.maximized);
 
-            Some(WallpaperConfig {
-                section: section.to_string(),
-                enabled,
-                monitor_index,
-                z_index,
-                wallpaper_id,
-                pause_focus_mode,
-                pause_maximized_mode,
-                pause_fullscreen_mode,
-            })
-        })
-        .collect()
+    let mut pause_fullscreen_mode = pause_mode_at(section_map, "pause_fullscreen")
+        .or_else(|| pause_mode_in_pausing(section_map, "fullscreen"))
+        .or(legacy_fullscreen)
+        .unwrap_or(settings.performance.pausing.fullscreen);
+
+    if bool_at(section_map, "pause_fullscreen_all_monitors").unwrap_or(false) {
+        pause_fullscreen_mode = PauseMode::AllMonitors;
+    }
+
+    Some(WallpaperConfig {
+        section: section.to_string(),
+        enabled,
+        monitor_index,
+        mode,
+        z_index,
+        wallpaper_id,
+        pause_focus_mode,
+        pause_maximized_mode,
+        pause_fullscreen_mode,
+    })
 }
 
 fn parse_settings(root: &Mapping) -> AddonSettings {

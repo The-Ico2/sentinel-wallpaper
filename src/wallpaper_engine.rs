@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     mem,
     path::{Path, PathBuf},
@@ -188,17 +189,32 @@ impl WallpaperRuntime {
             config.enabled_wallpapers().len()
         );
 
-        for profile in config.enabled_wallpapers() {
-            self.launch_profile(profile, &assets, &monitors);
+        let mut assigned_monitors = HashSet::<usize>::new();
+        let enabled_profiles = config.enabled_wallpapers();
+
+        for priority in [0u8, 1u8, 2u8] {
+            for profile in enabled_profiles.iter().copied() {
+                if profile_priority(profile) != priority {
+                    continue;
+                }
+                self.launch_profile(profile, &assets, &monitors, &mut assigned_monitors);
+            }
         }
     }
 
-    fn launch_profile(&mut self, profile: &WallpaperConfig, assets: &[RegistryAsset], monitors: &[MonitorArea]) {
+    fn launch_profile(
+        &mut self,
+        profile: &WallpaperConfig,
+        assets: &[RegistryAsset],
+        monitors: &[MonitorArea],
+        assigned_monitors: &mut HashSet<usize>,
+    ) {
         warn!(
-            "[WALLPAPER][PROFILE] section='{}' wallpaper_id='{}' monitor_index={:?} z_index='{}'",
+            "[WALLPAPER][PROFILE] section='{}' wallpaper_id='{}' monitor_index={:?} mode='{}' z_index='{}'",
             profile.section,
             profile.wallpaper_id,
             profile.monitor_index,
+            profile.mode,
             profile.z_index
         );
 
@@ -225,12 +241,34 @@ impl WallpaperRuntime {
             url
         );
 
-        let targets = resolve_target_monitors(monitors, &profile.monitor_index);
+        let targets = resolve_target_monitors(monitors, &profile.monitor_index, assigned_monitors);
         if targets.is_empty() {
             warn!(
                 "[WALLPAPER] Section '{}' has no resolved monitor targets",
                 profile.section
             );
+            return;
+        }
+
+        for target in &targets {
+            assigned_monitors.insert(target.index);
+        }
+
+        if profile.mode.eq_ignore_ascii_case("span") && targets.len() > 1 {
+            let span_target = make_span_monitor_area(&targets);
+            match self.launch_into_monitor(profile, &span_target, &url) {
+                Ok(()) => warn!(
+                    "[WALLPAPER] Embedded '{}' as span across {} monitor(s)",
+                    profile.wallpaper_id,
+                    targets.len(),
+                ),
+                Err(e) => warn!(
+                    "[WALLPAPER] Failed to embed span '{}' ({} monitor(s)): {}",
+                    profile.wallpaper_id,
+                    targets.len(),
+                    e
+                ),
+            }
             return;
         }
 
@@ -1236,29 +1274,43 @@ fn resolve_asset_url(asset: &RegistryAsset) -> Option<String> {
     None
 }
 
-fn resolve_target_monitors<'a>(monitors: &'a [MonitorArea], keys: &[String]) -> Vec<&'a MonitorArea> {
-    if keys.iter().any(|v| v == "*") {
-        return monitors.iter().collect();
+fn resolve_target_monitors<'a>(
+    monitors: &'a [MonitorArea],
+    keys: &[String],
+    assigned_monitors: &HashSet<usize>,
+) -> Vec<&'a MonitorArea> {
+    let mut result = Vec::<&MonitorArea>::new();
+
+    if keys.iter().any(|key| key.eq_ignore_ascii_case("p")) {
+        if let Some(primary) = monitors.iter().find(|monitor| monitor.primary) {
+            result.push(primary);
+        }
     }
 
-    let mut result = Vec::<&MonitorArea>::new();
     for key in keys {
-        if key.eq_ignore_ascii_case("p") {
-            for monitor in monitors {
-                if monitor.primary && !result.iter().any(|m| m.index == monitor.index) {
-                    result.push(monitor);
-                }
-            }
+        if key == "*" || key.eq_ignore_ascii_case("p") {
             continue;
         }
 
         if let Ok(index) = key.parse::<usize>() {
-            if index > 0 {
-                if let Some(monitor) = monitors.get(index - 1) {
-                    if !result.iter().any(|m| m.index == monitor.index) {
-                        result.push(monitor);
-                    }
+            if let Some(monitor) = monitors.get(index) {
+                if assigned_monitors.contains(&monitor.index) {
+                    continue;
                 }
+                if !result.iter().any(|m| m.index == monitor.index) {
+                    result.push(monitor);
+                }
+            }
+        }
+    }
+
+    if keys.iter().any(|key| key == "*") {
+        for monitor in monitors {
+            if assigned_monitors.contains(&monitor.index) {
+                continue;
+            }
+            if !result.iter().any(|m| m.index == monitor.index) {
+                result.push(monitor);
             }
         }
     }
@@ -1304,7 +1356,80 @@ fn enumerate_monitors() -> Vec<MonitorArea> {
         );
     }
 
+    if monitors.len() > 1 {
+        let min_height = monitors
+            .iter()
+            .map(|m| (m.rect.bottom - m.rect.top).max(1))
+            .min()
+            .unwrap_or(1);
+        let row_tolerance = (min_height / 4).max(80);
+
+        monitors.sort_by(|a, b| b.rect.top.cmp(&a.rect.top));
+
+        let mut rows: Vec<(i32, Vec<MonitorArea>)> = Vec::new();
+        for monitor in monitors.into_iter() {
+            if let Some((_, row)) = rows
+                .iter_mut()
+                .find(|(anchor_y, _)| (monitor.rect.top - *anchor_y).abs() <= row_tolerance)
+            {
+                row.push(monitor);
+            } else {
+                rows.push((monitor.rect.top, vec![monitor]));
+            }
+        }
+
+        rows.sort_by(|(ay, _), (by, _)| by.cmp(ay));
+
+        let mut flattened = Vec::<MonitorArea>::new();
+        for (_, mut row) in rows {
+            row.sort_by(|a, b| a.rect.left.cmp(&b.rect.left));
+            flattened.extend(row);
+        }
+
+        monitors = flattened;
+    }
+
+    for (index, monitor) in monitors.iter_mut().enumerate() {
+        monitor.index = index;
+    }
+
     monitors
+}
+
+fn profile_priority(profile: &WallpaperConfig) -> u8 {
+    if profile
+        .monitor_index
+        .iter()
+        .any(|key| key.eq_ignore_ascii_case("p"))
+    {
+        return 0;
+    }
+
+    if profile.monitor_index.iter().any(|key| key == "*") {
+        return 2;
+    }
+
+    1
+}
+
+fn make_span_monitor_area(monitors: &[&MonitorArea]) -> MonitorArea {
+    let left = monitors.iter().map(|m| m.rect.left).min().unwrap_or(0);
+    let top = monitors.iter().map(|m| m.rect.top).min().unwrap_or(0);
+    let right = monitors.iter().map(|m| m.rect.right).max().unwrap_or(0);
+    let bottom = monitors.iter().map(|m| m.rect.bottom).max().unwrap_or(0);
+    let primary = monitors.iter().any(|m| m.primary);
+    let index = monitors.iter().map(|m| m.index).min().unwrap_or(0);
+
+    MonitorArea {
+        index,
+        primary,
+        rect: RECT {
+            left,
+            top,
+            right,
+            bottom,
+        },
+    }
 }
 
 fn ensure_desktop_host() -> Option<HWND> {
