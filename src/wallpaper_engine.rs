@@ -371,7 +371,7 @@ impl WallpaperRuntime {
             }
         }
 
-        if self.last_registry_tick.elapsed() >= Duration::from_millis(250) {
+        if self.last_registry_tick.elapsed() >= Duration::from_millis(100) {
             self.last_registry_tick = Instant::now();
 
             if let Some(payload) = build_registry_payload_json() {
