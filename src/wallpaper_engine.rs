@@ -10,11 +10,17 @@ use std::{
 use serde::Deserialize;
 use serde_json::Value;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
+use image::{Rgba, RgbaImage};
 use windows::{
     core::{w, BOOL, PCWSTR},
     Win32::{
         Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
-        Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW},
+        Graphics::Gdi::{
+            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+            EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, HDC, HGDIOBJ, HMONITOR,
+            MONITORINFOEXW, ReleaseDC, SelectObject, BI_RGB, BITMAPINFO, BITMAPINFOHEADER,
+            DIB_RGB_COLORS, SRCCOPY,
+        },
         Media::Audio::{
             eCommunications, eConsole, eMultimedia, eRender, IMMDeviceEnumerator,
             MMDeviceEnumerator,
@@ -32,6 +38,7 @@ use windows::{
             WINDOW_STYLE, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
             WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
             WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+            SystemParametersInfoW, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
         },
     },
 };
@@ -98,6 +105,7 @@ pub struct WallpaperRuntime {
     last_pause_tick: Instant,
     pause_check_interval: Duration,
     log_pause_state_changes: bool,
+    last_pause_snapshot_path: Option<PathBuf>,
 }
 
 impl WallpaperRuntime {
@@ -131,6 +139,7 @@ impl WallpaperRuntime {
             last_pause_tick: Instant::now(),
             pause_check_interval: Duration::from_millis(500),
             log_pause_state_changes: true,
+            last_pause_snapshot_path: None,
         }
     }
 
@@ -147,6 +156,7 @@ impl WallpaperRuntime {
         self.pause_check_interval =
             Duration::from_millis(config.settings.performance.pausing.check_interval_ms.max(100));
         self.log_pause_state_changes = config.settings.diagnostics.log_pause_state_changes;
+        self.last_pause_snapshot_path = None;
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -426,16 +436,27 @@ impl WallpaperRuntime {
 
                 if self.last_pause_tick.elapsed() >= self.pause_check_interval {
                     self.last_pause_tick = Instant::now();
-                    self.evaluate_and_apply_pause(&sysdata, &appdata);
+                    let states_changed = self.evaluate_and_apply_pause(&sysdata, &appdata);
+                    if states_changed {
+                        let all_paused_now = self.hosted.iter().all(|h| h.paused);
+                        if !all_paused && all_paused_now {
+                            if let Err(e) = self.capture_and_set_paused_wallpaper_snapshot() {
+                                warn!("[WALLPAPER][PAUSE] Snapshot capture/apply failed: {}", e);
+                            }
+                        }
+                        self.apply_host_visibility();
+                    }
                 }
             }
         }
     }
 
-    fn evaluate_and_apply_pause(&mut self, sysdata: &Value, appdata: &Value) {
+    fn evaluate_and_apply_pause(&mut self, sysdata: &Value, appdata: &Value) -> bool {
         if self.hosted.is_empty() {
-            return;
+            return false;
         }
+
+        let mut states_changed = false;
 
         for hosted in &mut self.hosted {
             hosted.monitor_id = resolve_monitor_id_for_rect(sysdata, hosted.monitor_rect);
@@ -476,9 +497,7 @@ impl WallpaperRuntime {
 
             if should_pause != hosted.paused {
                 hosted.paused = should_pause;
-                unsafe {
-                    let _ = hosted.controller.SetIsVisible(!should_pause);
-                }
+                states_changed = true;
                 let payload = format!("{{\"type\":\"native_pause\",\"paused\":{}}}", should_pause);
                 let _ = post_webview_json(&hosted.webview, &payload);
                 if self.log_pause_state_changes {
@@ -493,6 +512,165 @@ impl WallpaperRuntime {
                 }
             }
         }
+
+        states_changed
+    }
+
+    fn apply_host_visibility(&mut self) {
+        for hosted in &mut self.hosted {
+            unsafe {
+                let _ = hosted.controller.SetIsVisible(!hosted.paused);
+            }
+        }
+    }
+
+    fn capture_and_set_paused_wallpaper_snapshot(&mut self) -> std::result::Result<(), String> {
+        if self.hosted.is_empty() {
+            return Ok(());
+        }
+
+        let min_left = self
+            .hosted
+            .iter()
+            .map(|h| h.monitor_rect.left)
+            .min()
+            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
+        let min_top = self
+            .hosted
+            .iter()
+            .map(|h| h.monitor_rect.top)
+            .min()
+            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
+        let max_right = self
+            .hosted
+            .iter()
+            .map(|h| h.monitor_rect.right)
+            .max()
+            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
+        let max_bottom = self
+            .hosted
+            .iter()
+            .map(|h| h.monitor_rect.bottom)
+            .max()
+            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
+
+        let virtual_width = (max_right - min_left).max(1);
+        let virtual_height = (max_bottom - min_top).max(1);
+        let mut stitched = RgbaImage::from_pixel(virtual_width as u32, virtual_height as u32, Rgba([0, 0, 0, 255]));
+
+        for hosted in &self.hosted {
+            let width = (hosted.monitor_rect.right - hosted.monitor_rect.left).max(1);
+            let height = (hosted.monitor_rect.bottom - hosted.monitor_rect.top).max(1);
+            let pixels = capture_window_bgra(hosted.hwnd, width, height)?;
+            let offset_x = (hosted.monitor_rect.left - min_left).max(0);
+            let offset_y = (hosted.monitor_rect.top - min_top).max(0);
+
+            for y in 0..height {
+                for x in 0..width {
+                    let src = ((y * width + x) * 4) as usize;
+                    if src + 3 >= pixels.len() {
+                        continue;
+                    }
+                    let b = pixels[src];
+                    let g = pixels[src + 1];
+                    let r = pixels[src + 2];
+                    let dst_x = (offset_x + x) as u32;
+                    let dst_y = (offset_y + y) as u32;
+                    if dst_x < stitched.width() && dst_y < stitched.height() {
+                        stitched.put_pixel(dst_x, dst_y, Rgba([r, g, b, 255]));
+                    }
+                }
+            }
+        }
+
+        let snapshot_dir = sentinel_assets_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("wallpaper")
+            .join("snapshots");
+        let _ = fs::create_dir_all(&snapshot_dir);
+        let snapshot_path = snapshot_dir.join("paused_wallpaper_snapshot.bmp");
+        stitched
+            .save(&snapshot_path)
+            .map_err(|e| format!("Failed to save snapshot bitmap: {e}"))?;
+
+        apply_windows_wallpaper(&snapshot_path)?;
+        self.last_pause_snapshot_path = Some(snapshot_path.clone());
+        if self.log_pause_state_changes {
+            warn!(
+                "[WALLPAPER][PAUSE] Applied snapshot wallpaper: {}",
+                snapshot_path.display()
+            );
+        }
+        Ok(())
+    }
+}
+
+fn capture_window_bgra(hwnd: HWND, width: i32, height: i32) -> std::result::Result<Vec<u8>, String> {
+    unsafe {
+        let src_dc = GetDC(Some(hwnd));
+        if src_dc.0.is_null() {
+            return Err("GetDC failed".to_string());
+        }
+
+        let mem_dc = CreateCompatibleDC(Some(src_dc));
+        if mem_dc.0.is_null() {
+            let _ = ReleaseDC(Some(hwnd), src_dc);
+            return Err("CreateCompatibleDC failed".to_string());
+        }
+
+        let bitmap = CreateCompatibleBitmap(src_dc, width, height);
+        if bitmap.0.is_null() {
+            let _ = DeleteDC(mem_dc);
+            let _ = ReleaseDC(Some(hwnd), src_dc);
+            return Err("CreateCompatibleBitmap failed".to_string());
+        }
+
+        let old = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+        let _ = BitBlt(mem_dc, 0, 0, width, height, Some(src_dc), 0, 0, SRCCOPY)
+            .map_err(|e| format!("BitBlt failed: {e:?}"));
+
+        let mut bmi = BITMAPINFO::default();
+        bmi.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = width;
+        bmi.bmiHeader.biHeight = -height;
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB.0;
+
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        let lines = GetDIBits(
+            mem_dc,
+            bitmap,
+            0,
+            height as u32,
+            Some(pixels.as_mut_ptr() as *mut core::ffi::c_void),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        let _ = SelectObject(mem_dc, old);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(Some(hwnd), src_dc);
+
+        if lines == 0 {
+            return Err("GetDIBits failed".to_string());
+        }
+
+        Ok(pixels)
+    }
+}
+
+fn apply_windows_wallpaper(path: &Path) -> std::result::Result<(), String> {
+    let wide = to_wstring(path.to_string_lossy().as_ref());
+    unsafe {
+        SystemParametersInfoW(
+            SPI_SETDESKWALLPAPER,
+            0,
+            Some(wide.as_ptr() as *mut core::ffi::c_void),
+            SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
+        )
+        .map_err(|e| format!("SystemParametersInfoW(SPI_SETDESKWALLPAPER) failed: {e:?}"))
     }
 }
 
