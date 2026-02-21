@@ -17,8 +17,8 @@ use windows::{
         Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
         Graphics::Gdi::{
             BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-            EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, HDC, HGDIOBJ, HMONITOR,
-            MONITORINFOEXW, ReleaseDC, SelectObject, BI_RGB, BITMAPINFO, BITMAPINFOHEADER,
+            EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, HDC, HGDIOBJ, HMONITOR, MonitorFromWindow,
+            MONITORINFOEXW, MONITOR_DEFAULTTONEAREST, ReleaseDC, SelectObject, BI_RGB, BITMAPINFO, BITMAPINFOHEADER,
             DIB_RGB_COLORS, SRCCOPY,
         },
         Media::Audio::{
@@ -31,7 +31,7 @@ use windows::{
         UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
         UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, FindWindowExW, FindWindowW,
-            GetCursorPos, GetWindowLongW, GetWindowRect, RegisterClassW, SendMessageTimeoutW,
+            GetCursorPos, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsZoomed, RegisterClassW, SendMessageTimeoutW,
             SetWindowLongW,
             SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
             SMTO_NORMAL, SWP_FRAMECHANGED,
@@ -463,19 +463,7 @@ impl WallpaperRuntime {
             hosted.monitor_id = resolve_monitor_id_for_rect(sysdata, hosted.monitor_rect);
         }
 
-        let mut any_focused = false;
-        let mut any_maximized = false;
-        let mut any_fullscreen = false;
-
-        for hosted in &self.hosted {
-            let Some(monitor_id) = hosted.monitor_id.as_deref() else {
-                continue;
-            };
-            let states = monitor_window_states(appdata, monitor_id);
-            any_focused |= states.focused;
-            any_maximized |= states.maximized;
-            any_fullscreen |= states.fullscreen;
-        }
+        let global_states = foreground_window_states();
 
         for hosted in &mut self.hosted {
             let local_states = hosted
@@ -484,16 +472,16 @@ impl WallpaperRuntime {
                 .map(|id| monitor_window_states(appdata, id))
                 .unwrap_or_default();
 
-            let should_pause = mode_triggered(hosted.pause_focus_mode, local_states.focused, any_focused)
+            let should_pause = mode_triggered(hosted.pause_focus_mode, local_states.focused, global_states.focused)
                 || mode_triggered(
                     hosted.pause_maximized_mode,
                     local_states.maximized,
-                    any_maximized,
+                    global_states.maximized,
                 )
                 || mode_triggered(
                     hosted.pause_fullscreen_mode,
                     local_states.fullscreen,
-                    any_fullscreen,
+                    global_states.fullscreen,
                 );
 
             if should_pause != hosted.paused {
@@ -735,6 +723,50 @@ fn monitor_window_states(appdata: &Value, monitor_id: &str) -> MonitorWindowStat
     }
 
     states
+}
+
+fn foreground_window_states() -> MonitorWindowStates {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return MonitorWindowStates::default();
+        }
+
+        let mut states = MonitorWindowStates {
+            focused: true,
+            maximized: IsZoomed(hwnd).0 != 0,
+            fullscreen: false,
+        };
+
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return states;
+        }
+
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if monitor.0.is_null() {
+            return states;
+        }
+
+        let mut mi_ex: MONITORINFOEXW = std::mem::zeroed();
+        mi_ex.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        if GetMonitorInfoW(monitor, &mut mi_ex.monitorInfo).0 == 0 {
+            return states;
+        }
+
+        let monitor_rc = mi_ex.monitorInfo.rcMonitor;
+        let epsilon = 1i32;
+        let covers_monitor = (rect.left - monitor_rc.left).abs() <= epsilon
+            && (rect.top - monitor_rc.top).abs() <= epsilon
+            && (rect.right - monitor_rc.right).abs() <= epsilon
+            && (rect.bottom - monitor_rc.bottom).abs() <= epsilon;
+
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let has_frame = (style & (WS_CAPTION.0 | WS_THICKFRAME.0)) != 0;
+        states.fullscreen = covers_monitor && !states.maximized && !has_frame;
+
+        states
+    }
 }
 
 fn resolve_monitor_id_for_rect(sysdata: &Value, rect: RECT) -> Option<String> {

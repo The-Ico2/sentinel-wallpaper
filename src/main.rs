@@ -6,7 +6,11 @@ mod logging;
 mod utility;
 mod wallpaper_engine;
 
-use std::{thread, time::Duration};
+use std::{
+	fs,
+	thread,
+	time::{Duration, Instant, SystemTime},
+};
 use windows::Win32::UI::HiDpi::{
 	SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
@@ -110,7 +114,7 @@ fn main() -> windows::core::Result<()> {
 	ensure_config_exists();
 
 	let config_path = addon_config_path();
-	let config = AddonConfig::load(&config_path).unwrap_or_else(|| AddonConfig {
+	let mut config = AddonConfig::load(&config_path).unwrap_or_else(|| AddonConfig {
 		update_check: true,
 		debug: false,
 		log_level: "warn".to_string(),
@@ -128,7 +132,14 @@ fn main() -> windows::core::Result<()> {
 
 	let mut runtime = WallpaperRuntime::new();
 	runtime.apply(&config);
-	let loop_sleep = Duration::from_millis(config.settings.runtime.tick_sleep_ms.max(1));
+	let mut loop_sleep = Duration::from_millis(config.settings.runtime.tick_sleep_ms.max(1));
+	let mut watcher_enabled = config.settings.performance.watcher.enabled;
+	let mut watcher_interval =
+		Duration::from_millis(config.settings.performance.watcher.interval_ms.max(100));
+	let mut last_watch_tick = Instant::now();
+	let mut last_config_modified: Option<SystemTime> = fs::metadata(&config_path)
+		.and_then(|m| m.modified())
+		.ok();
 
 	loop {
 		unsafe {
@@ -143,6 +154,51 @@ fn main() -> windows::core::Result<()> {
 		}
 
 		runtime.tick_interactions();
+
+		if watcher_enabled && last_watch_tick.elapsed() >= watcher_interval {
+			last_watch_tick = Instant::now();
+
+			let current_modified = fs::metadata(&config_path)
+				.and_then(|m| m.modified())
+				.ok();
+
+			let changed = match (last_config_modified, current_modified) {
+				(Some(prev), Some(curr)) => curr > prev,
+				(None, Some(_)) => true,
+				_ => false,
+			};
+
+			if changed {
+				match AddonConfig::load(&config_path) {
+					Some(new_config) => {
+						config = new_config;
+						runtime.apply(&config);
+						loop_sleep = Duration::from_millis(config.settings.runtime.tick_sleep_ms.max(1));
+						watcher_enabled = config.settings.performance.watcher.enabled;
+						watcher_interval = Duration::from_millis(
+							config.settings.performance.watcher.interval_ms.max(100),
+						);
+						if config.settings.diagnostics.log_watcher_reloads {
+							warn!(
+								"[{}][WATCHER] Reloaded config from {}",
+								DEBUG_NAME,
+								config_path.display()
+							);
+						}
+					}
+					None => {
+						warn!(
+							"[{}][WATCHER] Detected config change but failed to parse {}; keeping previous config",
+							DEBUG_NAME,
+							config_path.display()
+						);
+					}
+				}
+
+				last_config_modified = current_modified;
+			}
+		}
+
 		thread::sleep(loop_sleep);
 	}
 }
