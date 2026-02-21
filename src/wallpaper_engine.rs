@@ -725,12 +725,12 @@ fn monitor_window_states(appdata: &Value, monitor_id: &str) -> MonitorWindowStat
 
         if focused {
             states.focused = true;
-        }
-        if state == "maximized" {
-            states.maximized = true;
-        }
-        if state == "fullscreen" {
-            states.fullscreen = true;
+            if state == "maximized" {
+                states.maximized = true;
+            }
+            if state == "fullscreen" {
+                states.fullscreen = true;
+            }
         }
     }
 
