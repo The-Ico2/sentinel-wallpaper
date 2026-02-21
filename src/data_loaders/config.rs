@@ -6,7 +6,6 @@ use super::yaml::load_yaml;
 
 #[derive(Debug, Clone)]
 pub struct AddonConfig {
-    pub update_check: bool,
     pub debug: bool,
     pub log_level: String,
     pub settings: AddonSettings,
@@ -85,7 +84,6 @@ pub struct WallpaperConfig {
     pub section: String,
     pub enabled: bool,
     pub monitor_index: Vec<String>,
-    pub mode: String,
     pub z_index: String,
     pub wallpaper_id: String,
     pub pause_focus_mode: PauseMode,
@@ -227,7 +225,6 @@ impl AddonConfig {
         let map = root.as_mapping()?;
 
         let settings = parse_settings(map);
-        let update_check = settings.development.update_check;
         let debug = settings.development.debug;
         let log_level = settings.development.log_level.clone();
 
@@ -235,7 +232,6 @@ impl AddonConfig {
         wallpapers.sort_by(|a, b| section_order_key(&a.section).cmp(&section_order_key(&b.section)));
 
         Some(Self {
-            update_check,
             debug,
             log_level,
             settings,
@@ -264,7 +260,6 @@ fn parse_wallpaper_sections(map: &Mapping, settings: &AddonSettings) -> Vec<Wall
 
             let enabled = bool_at(section_map, "enabled").unwrap_or(true);
             let monitor_index = string_list_at(section_map, "monitor_index").unwrap_or_else(|| vec!["*".to_string()]);
-            let mode = str_at(section_map, "mode").unwrap_or("fill").to_string();
             let z_index = str_at(section_map, "z_index").unwrap_or("desktop").to_lowercase();
 
             let legacy_focus = bool_at(section_map, "pause_on_focus").map(PauseMode::from_legacy_bool);
@@ -294,7 +289,6 @@ fn parse_wallpaper_sections(map: &Mapping, settings: &AddonSettings) -> Vec<Wall
                 section: section.to_string(),
                 enabled,
                 monitor_index,
-                mode,
                 z_index,
                 wallpaper_id,
                 pause_focus_mode,
