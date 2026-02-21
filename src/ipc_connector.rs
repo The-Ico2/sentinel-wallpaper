@@ -5,12 +5,13 @@ use serde_json::Value;
 use std::thread;
 use std::time::Duration;
 use windows::{
+    core::HRESULT,
     core::{
         PCWSTR,
     },
     Win32::{
         System::Pipes::WaitNamedPipeW,
-        Foundation::{HANDLE, INVALID_HANDLE_VALUE, CloseHandle},
+        Foundation::{HANDLE, INVALID_HANDLE_VALUE, CloseHandle, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_PIPE_BUSY},
         Storage::FileSystem::{
             CreateFileW, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
             FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -30,6 +31,10 @@ pub struct IpcResponse {
     pub ok: bool,
     pub data: Option<Value>,
     pub error: Option<String>,
+}
+
+fn is_win32_error(err: &windows::core::Error, win32_code: u32) -> bool {
+    err.code() == HRESULT::from_win32(win32_code)
 }
 
 /// Sends a JSON IPC request to the Sentinel IPC server and returns the universal IpcResponse.
@@ -56,7 +61,11 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
         ) {
             Ok(h) => h,
             Err(e) => {
-                error!("[{}][IPC] Failed to open pipe: {:?}", DEBUG_NAME, e);
+                if is_win32_error(&e, ERROR_PIPE_BUSY.0) {
+                    info!("[{}][IPC] Pipe busy; skipping IPC request", DEBUG_NAME);
+                } else {
+                    info!("[{}][IPC] Failed to open pipe: {:?}", DEBUG_NAME, e);
+                }
                 return None;
             }
         };
@@ -77,24 +86,58 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
         };
         // Write request
         let mut written: u32 = 0;
-        if WriteFile(handle, Some(&req_bytes), Some(&mut written), None).is_err() {
-            error!("[{}][IPC] Failed to write to pipe", DEBUG_NAME);
+        if let Err(e) = WriteFile(handle, Some(&req_bytes), Some(&mut written), None) {
+            if is_win32_error(&e, ERROR_BROKEN_PIPE.0) {
+                info!("[{}][IPC] Pipe closed while writing request", DEBUG_NAME);
+            } else {
+                info!("[{}][IPC] Failed to write to pipe: {:?}", DEBUG_NAME, e);
+            }
             if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
             return None;
         }
-        let mut buffer: Vec<u8> = vec![0u8; 16 * 1024];
-        let mut read: u32 = 0;
-        if ReadFile(handle, Some(&mut buffer), Some(&mut read), None).is_err() {
-            error!("[{}][IPC] Failed to read from pipe", DEBUG_NAME);
-            if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
-            return None;
+
+        let mut response = Vec::<u8>::new();
+        loop {
+            let mut chunk: Vec<u8> = vec![0u8; 16 * 1024];
+            let mut read: u32 = 0;
+
+            match ReadFile(handle, Some(&mut chunk), Some(&mut read), None) {
+                Ok(_) => {
+                    if read == 0 {
+                        break;
+                    }
+                    response.extend_from_slice(&chunk[..read as usize]);
+                    break;
+                }
+                Err(e) => {
+                    if read > 0 {
+                        response.extend_from_slice(&chunk[..read as usize]);
+                    }
+
+                    if is_win32_error(&e, ERROR_MORE_DATA.0) {
+                        continue;
+                    }
+
+                    if is_win32_error(&e, ERROR_BROKEN_PIPE.0) {
+                        info!("[{}][IPC] Pipe closed while reading response", DEBUG_NAME);
+                    } else {
+                        info!("[{}][IPC] Failed to read from pipe: {:?}", DEBUG_NAME, e);
+                    }
+                    if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
+                    return None;
+                }
+            }
         }
 
         // Close handle
         if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
 
+        if response.is_empty() {
+            return None;
+        }
+
         // Parse response
-        match serde_json::from_slice::<IpcResponse>(&buffer[..read as usize]) {
+        match serde_json::from_slice::<IpcResponse>(&response) {
             Ok(v) => Some(v),
             Err(e) => {
                 error!("[{}][IPC] Failed to parse IPC response JSON: {:?}", DEBUG_NAME, e);
