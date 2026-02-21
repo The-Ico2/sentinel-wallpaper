@@ -26,6 +26,7 @@ use windows::{
             MMDeviceEnumerator,
         },
         Media::Audio::Endpoints::IAudioMeterInformation,
+        Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
         System::{Com::*, LibraryLoader::GetModuleHandleW},
         UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
         UI::WindowsAndMessaging::{
@@ -557,6 +558,7 @@ impl WallpaperRuntime {
         let virtual_width = (max_right - min_left).max(1);
         let virtual_height = (max_bottom - min_top).max(1);
         let mut stitched = RgbaImage::from_pixel(virtual_width as u32, virtual_height as u32, Rgba([0, 0, 0, 255]));
+        let mut has_non_black_pixel = false;
 
         for hosted in &self.hosted {
             let width = (hosted.monitor_rect.right - hosted.monitor_rect.left).max(1);
@@ -574,6 +576,9 @@ impl WallpaperRuntime {
                     let b = pixels[src];
                     let g = pixels[src + 1];
                     let r = pixels[src + 2];
+                    if r != 0 || g != 0 || b != 0 {
+                        has_non_black_pixel = true;
+                    }
                     let dst_x = (offset_x + x) as u32;
                     let dst_y = (offset_y + y) as u32;
                     if dst_x < stitched.width() && dst_y < stitched.height() {
@@ -581,6 +586,10 @@ impl WallpaperRuntime {
                     }
                 }
             }
+        }
+
+        if !has_non_black_pixel {
+            return Err("Captured wallpaper frame is fully black; refusing to apply snapshot wallpaper".to_string());
         }
 
         let snapshot_dir = sentinel_assets_dir()
@@ -626,8 +635,11 @@ fn capture_window_bgra(hwnd: HWND, width: i32, height: i32) -> std::result::Resu
         }
 
         let old = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        let _ = BitBlt(mem_dc, 0, 0, width, height, Some(src_dc), 0, 0, SRCCOPY)
-            .map_err(|e| format!("BitBlt failed: {e:?}"));
+        let printed = PrintWindow(hwnd, mem_dc, PRINT_WINDOW_FLAGS(2)).as_bool();
+        if !printed {
+            let _ = BitBlt(mem_dc, 0, 0, width, height, Some(src_dc), 0, 0, SRCCOPY)
+                .map_err(|e| format!("BitBlt fallback failed: {e:?}"));
+        }
 
         let mut bmi = BITMAPINFO::default();
         bmi.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as u32;
