@@ -37,7 +37,7 @@ use windows::{
 };
 
 use crate::{
-    data_loaders::config::{AddonConfig, WallpaperConfig},
+    data_loaders::config::{AddonConfig, PauseMode, WallpaperConfig},
     error,
     ipc_connector::request,
     utility::{sentinel_assets_dir, to_wstring},
@@ -69,6 +69,11 @@ struct HostedWallpaper {
     controller: ICoreWebView2Controller,
     webview: ICoreWebView2,
     monitor_rect: RECT,
+    monitor_id: Option<String>,
+    pause_focus_mode: PauseMode,
+    pause_maximized_mode: PauseMode,
+    pause_fullscreen_mode: PauseMode,
+    paused: bool,
 }
 
 impl Drop for HostedWallpaper {
@@ -90,6 +95,9 @@ pub struct WallpaperRuntime {
     last_audio_refresh: Instant,
     last_registry_tick: Instant,
     last_registry_payload: Option<String>,
+    last_pause_tick: Instant,
+    pause_check_interval: Duration,
+    log_pause_state_changes: bool,
 }
 
 impl WallpaperRuntime {
@@ -120,6 +128,9 @@ impl WallpaperRuntime {
             last_audio_refresh: Instant::now(),
             last_registry_tick: Instant::now(),
             last_registry_payload: None,
+            last_pause_tick: Instant::now(),
+            pause_check_interval: Duration::from_millis(500),
+            log_pause_state_changes: true,
         }
     }
 
@@ -132,6 +143,10 @@ impl WallpaperRuntime {
         self.last_audio_refresh = Instant::now();
         self.last_registry_tick = Instant::now();
         self.last_registry_payload = None;
+        self.last_pause_tick = Instant::now();
+        self.pause_check_interval =
+            Duration::from_millis(config.settings.performance.pausing.check_interval_ms.max(100));
+        self.log_pause_state_changes = config.settings.diagnostics.log_pause_state_changes;
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -273,6 +288,11 @@ impl WallpaperRuntime {
             controller,
             webview,
             monitor_rect: monitor.rect,
+            monitor_id: None,
+            pause_focus_mode: profile.pause_focus_mode,
+            pause_maximized_mode: profile.pause_maximized_mode,
+            pause_fullscreen_mode: profile.pause_fullscreen_mode,
+            paused: false,
         });
         warn!("[WALLPAPER][EMBED] host committed into runtime state");
         Ok(())
@@ -283,53 +303,62 @@ impl WallpaperRuntime {
             return;
         }
 
+        let all_paused = self.hosted.iter().all(|h| h.paused);
+        let registry_interval = if all_paused {
+            self.pause_check_interval
+        } else {
+            Duration::from_millis(100)
+        };
+
         let mut point = POINT::default();
-        unsafe {
-            if GetCursorPos(&mut point).is_err() {
-                return;
-            }
-        }
-
-        let cursor = (point.x, point.y);
-        let left_down = unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 };
-        let moved = self.last_cursor.map(|p| p != cursor).unwrap_or(true);
-        let just_pressed = left_down && !self.last_left_down;
-
-        if moved || just_pressed {
-            for hosted in &self.hosted {
-                if !point_in_rect(cursor, hosted.monitor_rect) {
-                    continue;
-                }
-
-                let width = (hosted.monitor_rect.right - hosted.monitor_rect.left).max(1);
-                let height = (hosted.monitor_rect.bottom - hosted.monitor_rect.top).max(1);
-                let local_x = (cursor.0 - hosted.monitor_rect.left).clamp(0, width);
-                let local_y = (cursor.1 - hosted.monitor_rect.top).clamp(0, height);
-                let norm_x = local_x as f64 / width as f64;
-                let norm_y = local_y as f64 / height as f64;
-
-                if moved {
-                    let payload = format!(
-                        "{{\"type\":\"native_move\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
-                        local_x, local_y, norm_x, norm_y
-                    );
-                    let _ = post_webview_json(&hosted.webview, &payload);
-                }
-
-                if just_pressed {
-                    let payload = format!(
-                        "{{\"type\":\"native_click\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
-                        local_x, local_y, norm_x, norm_y
-                    );
-                    let _ = post_webview_json(&hosted.webview, &payload);
+        if !all_paused {
+            unsafe {
+                if GetCursorPos(&mut point).is_err() {
+                    return;
                 }
             }
+
+            let cursor = (point.x, point.y);
+            let left_down = unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 };
+            let moved = self.last_cursor.map(|p| p != cursor).unwrap_or(true);
+            let just_pressed = left_down && !self.last_left_down;
+
+            if moved || just_pressed {
+                for hosted in &self.hosted {
+                    if hosted.paused || !point_in_rect(cursor, hosted.monitor_rect) {
+                        continue;
+                    }
+
+                    let width = (hosted.monitor_rect.right - hosted.monitor_rect.left).max(1);
+                    let height = (hosted.monitor_rect.bottom - hosted.monitor_rect.top).max(1);
+                    let local_x = (cursor.0 - hosted.monitor_rect.left).clamp(0, width);
+                    let local_y = (cursor.1 - hosted.monitor_rect.top).clamp(0, height);
+                    let norm_x = local_x as f64 / width as f64;
+                    let norm_y = local_y as f64 / height as f64;
+
+                    if moved {
+                        let payload = format!(
+                            "{{\"type\":\"native_move\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
+                            local_x, local_y, norm_x, norm_y
+                        );
+                        let _ = post_webview_json(&hosted.webview, &payload);
+                    }
+
+                    if just_pressed {
+                        let payload = format!(
+                            "{{\"type\":\"native_click\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
+                            local_x, local_y, norm_x, norm_y
+                        );
+                        let _ = post_webview_json(&hosted.webview, &payload);
+                    }
+                }
+            }
+
+            self.last_cursor = Some(cursor);
+            self.last_left_down = left_down;
         }
 
-        self.last_cursor = Some(cursor);
-        self.last_left_down = left_down;
-
-        if self.last_audio_tick.elapsed() >= Duration::from_millis(33) {
+        if !all_paused && self.last_audio_tick.elapsed() >= Duration::from_millis(33) {
             self.last_audio_tick = Instant::now();
 
             if self.last_audio_refresh.elapsed() >= Duration::from_millis(1200) {
@@ -360,6 +389,9 @@ impl WallpaperRuntime {
                     Ok(level) => {
                         let payload = format!("{{\"type\":\"native_audio\",\"level\":{:.6}}}", level);
                         for hosted in &self.hosted {
+                            if hosted.paused {
+                                continue;
+                            }
                             let _ = post_webview_json(&hosted.webview, &payload);
                         }
                     }
@@ -371,42 +403,192 @@ impl WallpaperRuntime {
             }
         }
 
-        if self.last_registry_tick.elapsed() >= Duration::from_millis(100) {
+        if self.last_registry_tick.elapsed() >= registry_interval {
             self.last_registry_tick = Instant::now();
 
-            if let Some(payload) = build_registry_payload_json() {
+            if let Some((sysdata, appdata, payload)) = build_registry_snapshot_and_payload() {
+                let has_active_hosts = self.hosted.iter().any(|h| !h.paused);
                 let should_send = self
                     .last_registry_payload
                     .as_ref()
                     .map(|prev| prev != &payload)
                     .unwrap_or(true);
 
-                if should_send {
+                if has_active_hosts && should_send {
                     self.last_registry_payload = Some(payload.clone());
                     for hosted in &self.hosted {
+                        if hosted.paused {
+                            continue;
+                        }
                         let _ = post_webview_json(&hosted.webview, &payload);
                     }
+                }
+
+                if self.last_pause_tick.elapsed() >= self.pause_check_interval {
+                    self.last_pause_tick = Instant::now();
+                    self.evaluate_and_apply_pause(&sysdata, &appdata);
+                }
+            }
+        }
+    }
+
+    fn evaluate_and_apply_pause(&mut self, sysdata: &Value, appdata: &Value) {
+        if self.hosted.is_empty() {
+            return;
+        }
+
+        for hosted in &mut self.hosted {
+            hosted.monitor_id = resolve_monitor_id_for_rect(sysdata, hosted.monitor_rect);
+        }
+
+        let mut any_focused = false;
+        let mut any_maximized = false;
+        let mut any_fullscreen = false;
+
+        for hosted in &self.hosted {
+            let Some(monitor_id) = hosted.monitor_id.as_deref() else {
+                continue;
+            };
+            let states = monitor_window_states(appdata, monitor_id);
+            any_focused |= states.focused;
+            any_maximized |= states.maximized;
+            any_fullscreen |= states.fullscreen;
+        }
+
+        for hosted in &mut self.hosted {
+            let local_states = hosted
+                .monitor_id
+                .as_deref()
+                .map(|id| monitor_window_states(appdata, id))
+                .unwrap_or_default();
+
+            let should_pause = mode_triggered(hosted.pause_focus_mode, local_states.focused, any_focused)
+                || mode_triggered(
+                    hosted.pause_maximized_mode,
+                    local_states.maximized,
+                    any_maximized,
+                )
+                || mode_triggered(
+                    hosted.pause_fullscreen_mode,
+                    local_states.fullscreen,
+                    any_fullscreen,
+                );
+
+            if should_pause != hosted.paused {
+                hosted.paused = should_pause;
+                unsafe {
+                    let _ = hosted.controller.SetIsVisible(!should_pause);
+                }
+                let payload = format!("{{\"type\":\"native_pause\",\"paused\":{}}}", should_pause);
+                let _ = post_webview_json(&hosted.webview, &payload);
+                if self.log_pause_state_changes {
+                    warn!(
+                        "[WALLPAPER][PAUSE] monitor={:?} paused={} (focused={} maximized={} fullscreen={})",
+                        hosted.monitor_id,
+                        should_pause,
+                        local_states.focused,
+                        local_states.maximized,
+                        local_states.fullscreen
+                    );
                 }
             }
         }
     }
 }
 
-fn build_registry_payload_json() -> Option<String> {
+#[derive(Default, Clone, Copy)]
+struct MonitorWindowStates {
+    focused: bool,
+    maximized: bool,
+    fullscreen: bool,
+}
+
+fn mode_triggered(mode: PauseMode, local_triggered: bool, any_triggered: bool) -> bool {
+    match mode {
+        PauseMode::Off => false,
+        PauseMode::PerMonitor => local_triggered,
+        PauseMode::AllMonitors => any_triggered,
+    }
+}
+
+fn monitor_window_states(appdata: &Value, monitor_id: &str) -> MonitorWindowStates {
+    let windows = appdata
+        .get(monitor_id)
+        .and_then(|v| v.get("windows"))
+        .and_then(|v| v.as_array());
+
+    let mut states = MonitorWindowStates::default();
+    let Some(windows) = windows else {
+        return states;
+    };
+
+    for window in windows {
+        let focused = window
+            .get("focused")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let state = window
+            .get("window_state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if focused {
+            states.focused = true;
+        }
+        if state == "maximized" {
+            states.maximized = true;
+        }
+        if state == "fullscreen" {
+            states.fullscreen = true;
+        }
+    }
+
+    states
+}
+
+fn resolve_monitor_id_for_rect(sysdata: &Value, rect: RECT) -> Option<String> {
+    let displays = sysdata.get("displays")?.as_array()?;
+
+    for display in displays {
+        let metadata = display.get("metadata")?;
+        let x = metadata.get("x").and_then(|v| v.as_i64())? as i32;
+        let y = metadata.get("y").and_then(|v| v.as_i64())? as i32;
+        let width = metadata.get("width").and_then(|v| v.as_i64())? as i32;
+        let height = metadata.get("height").and_then(|v| v.as_i64())? as i32;
+
+        if x == rect.left && y == rect.top && (x + width) == rect.right && (y + height) == rect.bottom {
+            if let Some(id) = display.get("id").and_then(|v| v.as_str()) {
+                return Some(id.to_string());
+            }
+            if let Some(id) = metadata.get("id").and_then(|v| v.as_str()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn build_registry_snapshot_and_payload() -> Option<(Value, Value, String)> {
     let sysdata_raw = request("registry", "list_sysdata", None)?;
     let appdata_raw = request("registry", "list_appdata", None)?;
 
     let sysdata = serde_json::from_str::<Value>(&sysdata_raw).unwrap_or(Value::Null);
     let appdata = serde_json::from_str::<Value>(&appdata_raw).unwrap_or(Value::Null);
 
-    Some(
+    let payload =
         serde_json::json!({
             "type": "native_registry",
             "sysdata": sysdata,
             "appdata": appdata,
         })
-        .to_string(),
-    )
+        .to_string();
+
+    let payload_value = serde_json::from_str::<Value>(&payload).ok()?;
+    let sys = payload_value.get("sysdata").cloned().unwrap_or(Value::Null);
+    let app = payload_value.get("appdata").cloned().unwrap_or(Value::Null);
+    Some((sys, app, payload))
 }
 
 struct SystemAudioMeter {
