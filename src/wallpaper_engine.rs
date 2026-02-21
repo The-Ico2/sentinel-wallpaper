@@ -107,6 +107,8 @@ pub struct WallpaperRuntime {
     pause_check_interval: Duration,
     log_pause_state_changes: bool,
     last_pause_snapshot_path: Option<PathBuf>,
+    cached_sysdata: Value,
+    cached_appdata: Value,
 }
 
 impl WallpaperRuntime {
@@ -141,6 +143,8 @@ impl WallpaperRuntime {
             pause_check_interval: Duration::from_millis(500),
             log_pause_state_changes: true,
             last_pause_snapshot_path: None,
+            cached_sysdata: Value::Null,
+            cached_appdata: Value::Null,
         }
     }
 
@@ -158,6 +162,8 @@ impl WallpaperRuntime {
             Duration::from_millis(config.settings.performance.pausing.check_interval_ms.max(100));
         self.log_pause_state_changes = config.settings.diagnostics.log_pause_state_changes;
         self.last_pause_snapshot_path = None;
+        self.cached_sysdata = Value::Null;
+        self.cached_appdata = Value::Null;
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -309,10 +315,12 @@ impl WallpaperRuntime {
         Ok(())
     }
 
-    pub fn tick_interactions(&mut self) {
+    pub fn tick_interactions(&mut self) -> bool {
         if self.hosted.is_empty() {
-            return;
+            return false;
         }
+
+        let mut unpaused_transition = false;
 
         let all_paused = self.hosted.iter().all(|h| h.paused);
         let registry_interval = if all_paused {
@@ -325,7 +333,7 @@ impl WallpaperRuntime {
         if !all_paused {
             unsafe {
                 if GetCursorPos(&mut point).is_err() {
-                    return;
+                    return false;
                 }
             }
 
@@ -418,6 +426,8 @@ impl WallpaperRuntime {
             self.last_registry_tick = Instant::now();
 
             if let Some((sysdata, appdata, payload)) = build_registry_snapshot_and_payload() {
+                self.cached_sysdata = sysdata;
+                self.cached_appdata = appdata;
                 let has_active_hosts = self.hosted.iter().any(|h| !h.paused);
                 let should_send = self
                     .last_registry_payload
@@ -434,22 +444,29 @@ impl WallpaperRuntime {
                         let _ = post_webview_json(&hosted.webview, &payload);
                     }
                 }
-
-                if self.last_pause_tick.elapsed() >= self.pause_check_interval {
-                    self.last_pause_tick = Instant::now();
-                    let states_changed = self.evaluate_and_apply_pause(&sysdata, &appdata);
-                    if states_changed {
-                        let all_paused_now = self.hosted.iter().all(|h| h.paused);
-                        if !all_paused && all_paused_now {
-                            if let Err(e) = self.capture_and_set_paused_wallpaper_snapshot() {
-                                warn!("[WALLPAPER][PAUSE] Snapshot capture/apply failed: {}", e);
-                            }
-                        }
-                        self.apply_host_visibility();
-                    }
-                }
             }
         }
+
+        if self.last_pause_tick.elapsed() >= self.pause_check_interval {
+            self.last_pause_tick = Instant::now();
+            let cached_sysdata = self.cached_sysdata.clone();
+            let cached_appdata = self.cached_appdata.clone();
+            let states_changed = self.evaluate_and_apply_pause(&cached_sysdata, &cached_appdata);
+            if states_changed {
+                let all_paused_now = self.hosted.iter().all(|h| h.paused);
+                if !all_paused && all_paused_now {
+                    if let Err(e) = self.capture_and_set_paused_wallpaper_snapshot() {
+                        warn!("[WALLPAPER][PAUSE] Snapshot capture/apply failed: {}", e);
+                    }
+                }
+                if all_paused && !all_paused_now {
+                    unpaused_transition = true;
+                }
+                self.apply_host_visibility();
+            }
+        }
+
+        unpaused_transition
     }
 
     fn evaluate_and_apply_pause(&mut self, sysdata: &Value, appdata: &Value) -> bool {
@@ -463,7 +480,7 @@ impl WallpaperRuntime {
             hosted.monitor_id = resolve_monitor_id_for_rect(sysdata, hosted.monitor_rect);
         }
 
-        let global_states = foreground_window_states();
+        let global_states = global_window_states(appdata).unwrap_or_else(foreground_window_states);
 
         for hosted in &mut self.hosted {
             let local_states = hosted
@@ -491,12 +508,15 @@ impl WallpaperRuntime {
                 let _ = post_webview_json(&hosted.webview, &payload);
                 if self.log_pause_state_changes {
                     warn!(
-                        "[WALLPAPER][PAUSE] monitor={:?} paused={} (focused={} maximized={} fullscreen={})",
+                        "[WALLPAPER][PAUSE] monitor={:?} paused={} (local: focused={} maximized={} fullscreen={}; global: focused={} maximized={} fullscreen={})",
                         hosted.monitor_id,
                         should_pause,
                         local_states.focused,
                         local_states.maximized,
-                        local_states.fullscreen
+                        local_states.fullscreen,
+                        global_states.focused,
+                        global_states.maximized,
+                        global_states.fullscreen
                     );
                 }
             }
@@ -1341,5 +1361,49 @@ fn ensure_desktop_host() -> Option<HWND> {
 
         warn!("[WALLPAPER][HOSTSEL] Final fallback to Progman");
         Some(progman)
+    }
+}
+
+fn global_window_states(appdata: &Value) -> Option<MonitorWindowStates> {
+    let app_map = appdata.as_object()?;
+    let mut states = MonitorWindowStates::default();
+    let mut found_focused = false;
+
+    for monitor_entry in app_map.values() {
+        let windows = monitor_entry
+            .get("windows")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        for window in windows {
+            let focused = window
+                .get("focused")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !focused {
+                continue;
+            }
+
+            found_focused = true;
+            states.focused = true;
+            let state = window
+                .get("window_state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if state == "maximized" {
+                states.maximized = true;
+            }
+            if state == "fullscreen" {
+                states.fullscreen = true;
+            }
+        }
+    }
+
+    if found_focused {
+        Some(states)
+    } else {
+        None
     }
 }

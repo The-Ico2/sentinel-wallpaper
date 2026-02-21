@@ -153,7 +153,11 @@ fn main() -> windows::core::Result<()> {
 			}
 		}
 
-		runtime.tick_interactions();
+		let unpaused_transition = runtime.tick_interactions();
+		if unpaused_transition && config.settings.runtime.reapply_on_pause_change {
+			runtime.apply(&config);
+			warn!("[{}][PAUSE] Reapplied runtime after unpause transition", DEBUG_NAME);
+		}
 
 		if watcher_enabled && last_watch_tick.elapsed() >= watcher_interval {
 			last_watch_tick = Instant::now();

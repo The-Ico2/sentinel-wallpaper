@@ -2,6 +2,8 @@
 
 use serde::{Deserialize};
 use serde_json::Value;
+use std::thread;
+use std::time::Duration;
 use windows::{
     core::{
         PCWSTR,
@@ -31,14 +33,14 @@ pub struct IpcResponse {
 }
 
 /// Sends a JSON IPC request to the Sentinel IPC server and returns the universal IpcResponse.
-fn send_ipc_request(req: &Value) -> Option<IpcResponse> {
+fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
     unsafe {
         let name = to_wstring(r"\\.\pipe\sentinel");
         let pipe_name = PCWSTR(name.as_ptr());
 
         // Wait for server
         if !WaitNamedPipeW(pipe_name, 5000).as_bool() {
-            warn!("[{}][IPC] WaitNamedPipe failed or timed out", DEBUG_NAME);
+            info!("[{}][IPC] WaitNamedPipe failed or timed out", DEBUG_NAME);
             return None;
         }
 
@@ -128,4 +130,13 @@ pub fn request(ns: &str, cmd: &str, args: Option<serde_json::Value>) -> Option<S
         info!("[{}][IPC] No IPC response received", DEBUG_NAME);
         return None;
     }
+}
+
+fn send_ipc_request(req: &Value) -> Option<IpcResponse> {
+    if let Some(resp) = send_ipc_request_once(req) {
+        return Some(resp);
+    }
+
+    thread::sleep(Duration::from_millis(40));
+    send_ipc_request_once(req)
 }
