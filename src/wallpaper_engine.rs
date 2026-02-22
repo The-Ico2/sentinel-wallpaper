@@ -29,7 +29,7 @@ use windows::{
         Media::Audio::Endpoints::IAudioMeterInformation,
         Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
         System::{Com::*, LibraryLoader::GetModuleHandleW},
-        UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
+        UI::Input::KeyboardAndMouse::GetAsyncKeyState,
         UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, FindWindowExW, FindWindowW,
             GetCursorPos, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsZoomed, RegisterClassW, SendMessageTimeoutW,
@@ -94,10 +94,33 @@ impl Drop for HostedWallpaper {
     }
 }
 
+/// Virtual-key codes we poll each tick for `native_key` events.
+const TRACKED_KEYS: &[(i32, &str)] = &[
+    (0x08, "Backspace"), (0x09, "Tab"), (0x0D, "Enter"), (0x10, "Shift"),
+    (0x11, "Control"), (0x12, "Alt"), (0x14, "CapsLock"), (0x1B, "Escape"),
+    (0x20, "Space"),
+    (0x25, "ArrowLeft"), (0x26, "ArrowUp"), (0x27, "ArrowRight"), (0x28, "ArrowDown"),
+    // digits 0-9
+    (0x30, "0"), (0x31, "1"), (0x32, "2"), (0x33, "3"), (0x34, "4"),
+    (0x35, "5"), (0x36, "6"), (0x37, "7"), (0x38, "8"), (0x39, "9"),
+    // letters A-Z
+    (0x41, "A"), (0x42, "B"), (0x43, "C"), (0x44, "D"), (0x45, "E"),
+    (0x46, "F"), (0x47, "G"), (0x48, "H"), (0x49, "I"), (0x4A, "J"),
+    (0x4B, "K"), (0x4C, "L"), (0x4D, "M"), (0x4E, "N"), (0x4F, "O"),
+    (0x50, "P"), (0x51, "Q"), (0x52, "R"), (0x53, "S"), (0x54, "T"),
+    (0x55, "U"), (0x56, "V"), (0x57, "W"), (0x58, "X"), (0x59, "Y"),
+    (0x5A, "Z"),
+    // F1-F12
+    (0x70, "F1"), (0x71, "F2"), (0x72, "F3"), (0x73, "F4"), (0x74, "F5"),
+    (0x75, "F6"), (0x76, "F7"), (0x77, "F8"), (0x78, "F9"), (0x79, "F10"),
+    (0x7A, "F11"), (0x7B, "F12"),
+];
+
 pub struct WallpaperRuntime {
     hosted: Vec<HostedWallpaper>,
     last_cursor: Option<(i32, i32)>,
     last_left_down: bool,
+    pressed_keys: HashSet<i32>,
     audio_meter: Option<SystemAudioMeter>,
     last_audio_tick: Instant,
     last_audio_retry: Instant,
@@ -134,6 +157,7 @@ impl WallpaperRuntime {
             hosted: Vec::new(),
             last_cursor: None,
             last_left_down: false,
+            pressed_keys: HashSet::new(),
             audio_meter,
             last_audio_tick: Instant::now(),
             last_audio_retry: Instant::now(),
@@ -153,6 +177,7 @@ impl WallpaperRuntime {
         self.hosted.clear();
         self.last_cursor = None;
         self.last_left_down = false;
+        self.pressed_keys.clear();
         self.last_audio_tick = Instant::now();
         self.last_audio_retry = Instant::now();
         self.last_audio_refresh = Instant::now();
@@ -376,7 +401,7 @@ impl WallpaperRuntime {
             }
 
             let cursor = (point.x, point.y);
-            let left_down = unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 };
+            let left_down = unsafe { (GetAsyncKeyState(0x01_i32) as u16 & 0x8000) != 0 };
             let moved = self.last_cursor.map(|p| p != cursor).unwrap_or(true);
             let just_pressed = left_down && !self.last_left_down;
 
@@ -413,6 +438,35 @@ impl WallpaperRuntime {
 
             self.last_cursor = Some(cursor);
             self.last_left_down = left_down;
+
+            // ── Keyboard tracking ──────────────────────────────────
+            for &(vk, label) in TRACKED_KEYS {
+                let down = unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
+                let was_down = self.pressed_keys.contains(&vk);
+                if down && !was_down {
+                    self.pressed_keys.insert(vk);
+                    let payload = format!(
+                        "{{\"type\":\"native_key\",\"key\":\"{}\",\"vk\":{},\"state\":\"down\"}}",
+                        label, vk
+                    );
+                    for hosted in &self.hosted {
+                        if !hosted.paused {
+                            let _ = post_webview_json(&hosted.webview, &payload);
+                        }
+                    }
+                } else if !down && was_down {
+                    self.pressed_keys.remove(&vk);
+                    let payload = format!(
+                        "{{\"type\":\"native_key\",\"key\":\"{}\",\"vk\":{},\"state\":\"up\"}}",
+                        label, vk
+                    );
+                    for hosted in &self.hosted {
+                        if !hosted.paused {
+                            let _ = post_webview_json(&hosted.webview, &payload);
+                        }
+                    }
+                }
+            }
         }
 
         if !all_paused && self.last_audio_tick.elapsed() >= Duration::from_millis(33) {
