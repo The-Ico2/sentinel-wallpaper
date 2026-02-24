@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod bootstrap;
 mod data_loaders;
 mod ipc_connector;
 mod logging;
@@ -28,64 +29,6 @@ use crate::{
 pub const ADDON_NAME: &str = "wallpaper";
 pub const DEBUG_NAME: &str = "WALLPAPER";
 
-fn ensure_config_exists() {
-	let config_path = addon_config_path();
-	if config_path.exists() {
-		return;
-	}
-
-	let default_config = r#"settings:
-	performance:
-		pausing:
-			focus: "per-monitor"
-			maximized: "per-monitor"
-			fullscreen: "all-monitors"
-			check_interval_ms: 500
-		watcher:
-			enabled: true
-			interval_ms: 600
-		interactions:
-			send_move: true
-			send_click: true
-			poll_interval_ms: 8
-			move_threshold_px: 0.5
-		audio:
-			enabled: true
-			sample_interval_ms: 100
-			endpoint_refresh_ms: 1200
-			retry_interval_ms: 2000
-			change_threshold: 0.015
-			quantize_decimals: 2
-	runtime:
-		tick_sleep_ms: 8
-		reapply_on_pause_change: true
-	diagnostics:
-		log_pause_state_changes: true
-		log_watcher_reloads: true
-	development:
-		update_check: true
-		debug: false
-		log_level: warn
-
-wallpaper:
-	enabled: true
-	monitor_index:
-		- "*"
-	wallpaper_id: "sentinel.default.dark"
-	mode: "fill"
-	z_index: "desktop"
-"#;
-
-	if let Some(parent) = config_path.parent() {
-		let _ = std::fs::create_dir_all(parent);
-	}
-
-	match std::fs::write(&config_path, default_config) {
-		Ok(_) => info!("[{}] Created default config at {}", DEBUG_NAME, config_path.display()),
-		Err(e) => error!("[{}] Failed to create config.yaml: {}", DEBUG_NAME, e),
-	}
-}
-
 fn addon_config_path() -> std::path::PathBuf {
 	if let Some(root) = addon_root_dir() {
 		return root.join("config.yaml");
@@ -110,9 +53,8 @@ fn enable_per_monitor_dpi_awareness() {
 }
 
 fn main() -> windows::core::Result<()> {
+	bootstrap::bootstrap_addon();
 	enable_per_monitor_dpi_awareness();
-
-	ensure_config_exists();
 
 	let config_path = addon_config_path();
 	let mut config = AddonConfig::load(&config_path).unwrap_or_else(|| AddonConfig {
