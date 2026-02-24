@@ -1,3 +1,4 @@
 *.lock
 *.png
 target/
+release.md
