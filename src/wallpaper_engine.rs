@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     mem,
     path::{Path, PathBuf},
@@ -83,6 +83,7 @@ struct HostedWallpaper {
     pause_maximized_mode: PauseMode,
     pause_fullscreen_mode: PauseMode,
     paused: bool,
+    asset_dir: PathBuf,
 }
 
 impl Drop for HostedWallpaper {
@@ -133,6 +134,8 @@ pub struct WallpaperRuntime {
     last_pause_snapshot_path: Option<PathBuf>,
     cached_sysdata: Value,
     cached_appdata: Value,
+    last_editable_tick: Instant,
+    editable_cache: HashMap<PathBuf, String>,
 }
 
 impl WallpaperRuntime {
@@ -170,6 +173,8 @@ impl WallpaperRuntime {
             last_pause_snapshot_path: None,
             cached_sysdata: Value::Null,
             cached_appdata: Value::Null,
+            last_editable_tick: Instant::now(),
+            editable_cache: HashMap::new(),
         }
     }
 
@@ -190,6 +195,8 @@ impl WallpaperRuntime {
         self.last_pause_snapshot_path = None;
         self.cached_sysdata = Value::Null;
         self.cached_appdata = Value::Null;
+        self.last_editable_tick = Instant::now();
+        self.editable_cache.clear();
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -281,7 +288,7 @@ impl WallpaperRuntime {
 
         if profile.mode.eq_ignore_ascii_case("span") && targets.len() > 1 {
             let span_target = make_span_monitor_area(&targets);
-            match self.launch_into_monitor(profile, &span_target, &url) {
+            match self.launch_into_monitor(profile, &span_target, &url, &asset.path) {
                 Ok(()) => warn!(
                     "[WALLPAPER] Embedded '{}' as span across {} monitor(s)",
                     profile.wallpaper_id,
@@ -298,7 +305,7 @@ impl WallpaperRuntime {
         }
 
         for monitor in targets {
-            match self.launch_into_monitor(profile, monitor, &url) {
+            match self.launch_into_monitor(profile, monitor, &url, &asset.path) {
                 Ok(()) => warn!(
                     "[WALLPAPER] Embedded '{}' into desktop host on monitor {}",
                     profile.wallpaper_id,
@@ -319,6 +326,7 @@ impl WallpaperRuntime {
         profile: &WallpaperConfig,
         monitor: &MonitorArea,
         url: &str,
+        asset_dir: &Path,
     ) -> std::result::Result<(), String> {
         warn!(
             "[WALLPAPER][EMBED] monitor={} primary={} rect=[l={},t={},r={},b={}]",
@@ -373,6 +381,7 @@ impl WallpaperRuntime {
             pause_maximized_mode: profile.pause_maximized_mode,
             pause_fullscreen_mode: profile.pause_fullscreen_mode,
             paused: false,
+            asset_dir: asset_dir.to_path_buf(),
         });
         warn!("[WALLPAPER][EMBED] host committed into runtime state");
         Ok(())
@@ -539,6 +548,12 @@ impl WallpaperRuntime {
             }
         }
 
+        // ── Live editable CSS var updates (manifest.json watch) ──
+        if self.last_editable_tick.elapsed() >= Duration::from_millis(250) {
+            self.last_editable_tick = Instant::now();
+            self.check_editable_updates();
+        }
+
         if self.last_pause_tick.elapsed() >= self.pause_check_interval {
             self.last_pause_tick = Instant::now();
             let cached_sysdata = self.cached_sysdata.clone();
@@ -621,6 +636,64 @@ impl WallpaperRuntime {
         for hosted in &mut self.hosted {
             unsafe {
                 let _ = hosted.controller.SetIsVisible(!hosted.paused);
+            }
+        }
+    }
+
+    /// Check each hosted wallpaper's manifest.json for editable changes.
+    /// When the editable section changes, push a `native_css_vars` message
+    /// containing all CSS variable updates to the affected WebView2 instances.
+    fn check_editable_updates(&mut self) {
+        // Collect unique asset dirs
+        let mut seen = HashSet::new();
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        for h in &self.hosted {
+            if seen.insert(h.asset_dir.clone()) {
+                dirs.push(h.asset_dir.clone());
+            }
+        }
+
+        for dir in &dirs {
+            let manifest_path = dir.join("manifest.json");
+            let content = match fs::read_to_string(&manifest_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let manifest: Value = match serde_json::from_str(&content) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let editable = match manifest.get("editable") {
+                Some(e) => e,
+                None => continue,
+            };
+
+            let editable_json = serde_json::to_string(editable).unwrap_or_default();
+
+            // Skip if nothing changed since last check
+            if self.editable_cache.get(dir).map(|prev| *prev == editable_json).unwrap_or(false) {
+                continue;
+            }
+            self.editable_cache.insert(dir.clone(), editable_json);
+
+            // Extract CSS variable → value pairs from the editable tree
+            let vars = extract_css_vars(editable);
+            if vars.is_empty() {
+                continue;
+            }
+
+            let vars_obj = Value::Object(vars);
+            let payload = format!(
+                "{{\"type\":\"native_css_vars\",\"vars\":{}}}",
+                serde_json::to_string(&vars_obj).unwrap_or_else(|_| "{}".to_string())
+            );
+
+            for hosted in &self.hosted {
+                if hosted.asset_dir == *dir {
+                    let _ = post_webview_json(&hosted.webview, &payload);
+                }
             }
         }
     }
@@ -1001,6 +1074,45 @@ fn post_webview_json(webview: &ICoreWebView2, payload: &str) -> std::result::Res
         webview
             .PostWebMessageAsJson(PCWSTR(payload_wide.as_ptr()))
             .map_err(|e| format!("WebView2 PostWebMessageAsJson failed: {e:?}"))
+    }
+}
+
+/// Walk the editable tree from manifest.json and collect { "--css-var": "value" } pairs.
+fn extract_css_vars(editable: &Value) -> serde_json::Map<String, Value> {
+    let mut vars = serde_json::Map::new();
+    let obj = match editable.as_object() {
+        Some(o) => o,
+        None => return vars,
+    };
+
+    for (_key, entry) in obj {
+        if let Some(variable) = entry.get("variable").and_then(|v| v.as_str()) {
+            // Direct editable with a variable
+            if let Some(value) = entry.get("value") {
+                vars.insert(variable.to_string(), Value::String(value_to_css_string(value)));
+            }
+        } else if let Some(sub_obj) = entry.as_object() {
+            // Group — iterate sub-entries (skip non-object fields like "name", "description")
+            for (_sub_key, sub) in sub_obj {
+                if let Some(variable) = sub.get("variable").and_then(|v| v.as_str()) {
+                    if let Some(value) = sub.get("value") {
+                        vars.insert(variable.to_string(), Value::String(value_to_css_string(value)));
+                    }
+                }
+            }
+        }
+    }
+
+    vars
+}
+
+/// Convert a serde_json Value to a CSS-appropriate string.
+fn value_to_css_string(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        _ => value.to_string(),
     }
 }
 
