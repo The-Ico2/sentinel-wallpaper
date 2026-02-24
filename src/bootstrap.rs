@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 use crate::ADDON_NAME;
-use crate::utility::sentinel_addons_dir;
+use crate::utility::{sentinel_addons_dir, sentinel_assets_dir};
 use crate::{info, warn};
 
 const EXE_NAME: &str = "sentinel-wallpaper.exe";
@@ -89,6 +89,7 @@ pub fn bootstrap_addon() {
     scaffold_config_yaml(&addon_dir);
     scaffold_schema_yaml(&addon_dir);
     scaffold_options_html(&options_dir);
+    scaffold_default_asset();
     info!("[{}] Scaffolding complete", ADDON_NAME);
 
     // If already running from the install dir, nothing more to do
@@ -431,4 +432,47 @@ r#"<!DOCTYPE html>
             Err(e) => warn!("[{}] Failed to create options/{}: {e}", ADDON_NAME, file),
         }
     }
+}
+
+// ── Bundled default wallpaper asset ──────────────────────────────────
+
+const DEFAULT_ASSET_MANIFEST: &str = include_str!("../assets/sentinel.default/manifest.json");
+const DEFAULT_ASSET_INDEX: &str = include_str!("../assets/sentinel.default/index.html");
+const DEFAULT_ASSET_PREVIEW: &[u8] = include_bytes!("../assets/sentinel.default/preview/1.png");
+
+fn scaffold_default_asset() {
+    let Some(assets_dir) = sentinel_assets_dir() else {
+        warn!("[{}] Cannot resolve Assets directory for default asset", ADDON_NAME);
+        return;
+    };
+
+    let asset_dir = assets_dir.join("wallpaper").join("sentinel.default");
+    let preview_dir = asset_dir.join("preview");
+    let _ = fs::create_dir_all(&preview_dir);
+
+    let manifest_path = asset_dir.join("manifest.json");
+    if !manifest_path.exists() {
+        match fs::write(&manifest_path, DEFAULT_ASSET_MANIFEST) {
+            Ok(_) => info!("[{}] Created default asset manifest.json", ADDON_NAME),
+            Err(e) => warn!("[{}] Failed to create default asset manifest.json: {e}", ADDON_NAME),
+        }
+    }
+
+    let index_path = asset_dir.join("index.html");
+    if !index_path.exists() {
+        match fs::write(&index_path, DEFAULT_ASSET_INDEX) {
+            Ok(_) => info!("[{}] Created default asset index.html", ADDON_NAME),
+            Err(e) => warn!("[{}] Failed to create default asset index.html: {e}", ADDON_NAME),
+        }
+    }
+
+    let preview_path = preview_dir.join("1.png");
+    if !preview_path.exists() {
+        match fs::write(&preview_path, DEFAULT_ASSET_PREVIEW) {
+            Ok(_) => info!("[{}] Created default asset preview/1.png", ADDON_NAME),
+            Err(e) => warn!("[{}] Failed to create default asset preview/1.png: {e}", ADDON_NAME),
+        }
+    }
+
+    info!("[{}] Default wallpaper asset (sentinel.default) scaffolded", ADDON_NAME);
 }

@@ -98,7 +98,7 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
 
         let mut response = Vec::<u8>::new();
         loop {
-            let mut chunk: Vec<u8> = vec![0u8; 16 * 1024];
+            let mut chunk: Vec<u8> = vec![0u8; 64 * 1024];
             let mut read: u32 = 0;
 
             match ReadFile(handle, Some(&mut chunk), Some(&mut read), None) {
@@ -107,7 +107,7 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
                         break;
                     }
                     response.extend_from_slice(&chunk[..read as usize]);
-                    break;
+                    // Keep reading — there may be more data in the pipe
                 }
                 Err(e) => {
                     if read > 0 {
@@ -118,11 +118,13 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
                         continue;
                     }
 
+                    // Broken pipe after accumulating data means the server
+                    // closed its end — treat whatever we have as the full response.
                     if is_win32_error(&e, ERROR_BROKEN_PIPE.0) {
-                        info!("[{}][IPC] Pipe closed while reading response", DEBUG_NAME);
-                    } else {
-                        info!("[{}][IPC] Failed to read from pipe: {:?}", DEBUG_NAME, e);
+                        break;
                     }
+
+                    info!("[{}][IPC] Failed to read from pipe: {:?}", DEBUG_NAME, e);
                     if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
                     return None;
                 }

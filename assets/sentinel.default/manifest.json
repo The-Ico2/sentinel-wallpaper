@@ -1,0 +1,110 @@
+{
+  "editable": {
+    "accentSettings": {
+      "accentBlue": {
+        "max": 255,
+        "min": 0,
+        "selector": "slider",
+        "step": 1,
+        "value": 0,
+        "variable": "--accent-b"
+      },
+      "accentGreen": {
+        "max": 255,
+        "min": 0,
+        "selector": "slider",
+        "step": 1,
+        "value": 0,
+        "variable": "--accent-g"
+      },
+      "accentRed": {
+        "max": 255,
+        "min": 0,
+        "selector": "slider",
+        "step": 1,
+        "value": 255,
+        "variable": "--accent-r"
+      },
+      "description": "Tune the accent and ember glow colors (RGB channels).",
+      "emberBlue": {
+        "max": 255,
+        "min": 0,
+        "selector": "slider",
+        "step": 1,
+        "value": 255,
+        "variable": "--ember-b"
+      },
+      "emberGreen": {
+        "max": 255,
+        "min": 0,
+        "selector": "slider",
+        "step": 1,
+        "value": 255,
+        "variable": "--ember-g"
+      },
+      "emberRed": {
+        "max": 255,
+        "min": 0,
+        "selector": "slider",
+        "step": 1,
+        "value": 255,
+        "variable": "--ember-r"
+      },
+      "name": "Accent Colors"
+    },
+    "background": {
+      "selector": "color-picker",
+      "value": "#ffffffFF",
+      "variable": "--bg-color"
+    },
+    "fontSettings": {
+      "description": "Customize the typography for the wallpaper HUD.",
+      "fontFamily": {
+        "selector": "font-picker",
+        "value": "Arial",
+        "variable": "--font-family"
+      },
+      "fontSize": {
+        "max": 20,
+        "min": 8,
+        "selector": "slider",
+        "step": 1,
+        "value": 12,
+        "variable": "--font-size"
+      },
+      "name": "Font Settings"
+    },
+    "hudOpacity": {
+      "max": 1,
+      "min": 0,
+      "selector": "slider",
+      "step": 0.05,
+      "value": 1,
+      "variable": "--hud-opacity"
+    },
+    "textColor": {
+      "selector": "color-picker",
+      "value": "#ffffffFF",
+      "variable": "--text-color"
+    }
+  },
+  "id": "sentinel.default",
+  "metadata": {
+    "author": {
+      "Ico2": "https://github.com/The-Ico2"
+    },
+    "last_updated": "2026-02-23T00:00:00Z",
+    "long_description": "A dark theme for Sentinel. This theme is designed to be easy on the eyes and provide a sleek, modern look for the Sentinel application.",
+    "preview": "preview/*",
+    "short_description": "A dark theme for Sentinel.",
+    "tags": [
+      "default",
+      "dark",
+      "theme",
+      "animated"
+    ]
+  },
+  "name": "Sentinel Default",
+  "version": "1.0.0",
+  "window_title": "Sentinel Default"
+}

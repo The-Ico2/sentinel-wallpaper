@@ -1,0 +1,1662 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Sentinel Default</title>
+<style>
+:root{
+  --au:0;
+  --bg-color: #0a0406;
+  --text-color: #ffe4d8;
+  --accent-r: 200;
+  --accent-g: 50;
+  --accent-b: 40;
+  --ember-r: 255;
+  --ember-g: 170;
+  --ember-b: 60;
+  --font-family: 'Segoe UI', Inter, system-ui, sans-serif;
+  --hud-opacity: 0.3;
+  --font-size: 12;
+}
+
+* {
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+}
+html,body{
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background: var(--bg-color);
+  color: var(--text-color);
+  font-family: var(--font-family);
+}
+canvas{
+  position:fixed;
+  inset:0;
+  z-index:0;
+}
+
+/* ─── HUD ─── */
+.hud {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 300px 1fr 300px;
+  grid-template-rows: auto 1fr auto;
+  gap: 6px;
+}
+
+/* title bar */
+.top {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(20, 8, 8, var(--hud-opacity));
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.12);
+  border-radius: 10px;
+  padding: 6px 16px;
+  backdrop-filter: blur(8px);
+}
+
+.top .time {
+  font-size: calc(var(--font-size) * 1px);
+  color: var(--text-color);
+  opacity: 0.85;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* panels */
+.pnl {
+  background: transparent;
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
+  border-radius: 10px;
+  padding: 7px 10px;
+  backdrop-filter: blur(2px);
+  overflow: visible;
+  flex-shrink: 1;
+  min-height: 0;
+}
+
+.pnl h2 {
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.75);
+  margin-bottom: 3px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  font-size: calc(var(--font-size) * 1px);
+  padding: 1px 0;
+}
+
+.lbl {
+  color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.8);
+}
+
+.val {
+  color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* progress bars */
+.bar-wrap {
+  height: 4px;
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
+  border-radius: 3px;
+  margin: 2px 0 3px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* left column */
+.left {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  min-height: 0;
+}
+
+.left::-webkit-scrollbar {
+  display: none;
+}
+
+/* right column */
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  min-height: 0;
+}
+
+.right::-webkit-scrollbar {
+  display: none;
+}
+
+/* capability signals */
+.caps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.cap {
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2);
+  border-radius: 7px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 6px;
+  color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.7);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.25);
+  transition: all 0.2s;
+}
+
+.cap.on {
+  color: var(--text-color);
+  border-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.4);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.12);
+}
+
+.cap.on .dot {
+  background: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.88);
+  box-shadow: 0 0 8px rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.6);
+}
+
+/* key chips */
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  height: 40px;
+  overflow: hidden;
+  align-content: flex-start;
+}
+
+.chip {
+  border: 1px solid rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.4);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.15);
+  color: var(--text-color);
+  border-radius: 6px;
+  font-size: 10px;
+  padding: 3px 6px;
+  animation: fadeout 0.9s ease forwards;
+}
+
+@keyframes fadeout {
+  0% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.95);
+  }
+}
+
+/* audio visualizer (combined, in right column) */
+.vizPanel {
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
+  border-radius: 10px;
+  padding: 7px 10px;
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  position: relative;
+  min-height: 100px;
+  flex-shrink: 1;
+}
+
+.vizPanel h2 {
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.75);
+  margin-bottom: 6px;
+}
+
+.vizPanel canvas {
+  position: absolute;
+  left: 12px;
+  top: 28px;
+  right: 12px;
+  bottom: 10px;
+  border-radius: 6px;
+  display: block;
+}
+
+/* status bar */
+.status {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pill {
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.12);
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-color);
+  opacity: 0.85;
+}
+
+.hint {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: rgba(var(--accent-r), calc(var(--accent-g) * 3.2), calc(var(--accent-b) * 3.75), 0.7);
+  text-transform: uppercase;
+}
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+
+<div class="hud">
+  <!-- Top bar -->
+  <div class="top">
+    <span class="time" id="clock">--:--:--</span>
+  </div>
+
+  <!-- Left: System Info -->
+  <div class="left">
+    <div class="pnl" id="cpuPanel">
+      <h2>CPU</h2>
+      <div id="cpuInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="gpuPanel">
+      <h2>GPU</h2>
+      <div id="gpuInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="ramPanel">
+      <h2>Memory</h2>
+      <div id="ramInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="storagePanel">
+      <h2>Storage</h2>
+      <div id="storageInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="networkPanel">
+      <h2>Network</h2>
+      <div id="networkInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="powerPanel">
+      <h2>Power</h2>
+      <div id="powerInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="systemPanel">
+      <h2>System</h2>
+      <div id="systemInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="processPanel">
+      <h2>Processes</h2>
+      <div id="processInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+  </div>
+
+  <!-- Center (empty, background shows through) -->
+  <div></div>
+
+  <!-- Right: Interaction + Audio + Connectivity -->
+  <div class="right">
+    <div class="pnl">
+      <h2>Event Signals</h2>
+      <div class="caps" id="caps"></div>
+    </div>
+    <div class="pnl">
+      <h2>Interaction Stats</h2>
+      <div id="interStats"></div>
+    </div>
+    <div class="pnl">
+      <h2>Recent Keys</h2>
+      <div class="keys" id="keys"></div>
+    </div>
+    <div class="pnl">
+      <h2>Audio Device</h2>
+      <div id="audioStats"></div>
+    </div>
+    <div class="pnl" id="wifiPanel">
+      <h2>Wi-Fi</h2>
+      <div id="wifiInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="btPanel">
+      <h2>Bluetooth</h2>
+      <div id="btInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <!-- <div class="pnl" id="idlePanel">
+      <h2>Idle</h2>
+      <div id="idleInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div> -->
+    <div class="pnl" id="displayPanel">
+      <h2>Displays</h2>
+      <div id="displayInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="pnl" id="mediaPanel">
+      <h2>Media Session</h2>
+      <div id="mediaInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+    </div>
+    <div class="vizPanel">
+      <h2>Audio</h2>
+      <canvas id="levelCanvas"></canvas>
+      <canvas id="freqCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status">
+    <span class="hint" id="fpsHint">FPS: --</span>
+    <span class="pill" id="statusPill">running</span>
+  </div>
+</div>
+
+<!-- Sentinel SDK -->
+<script src="../sentinel.js"></script>
+
+<script>
+/* ───────── Canvas setup ───────── */
+const C  = document.getElementById('fx');
+const X  = C.getContext('2d');
+const FC = document.getElementById('freqCanvas');
+const FX = FC.getContext('2d');
+const LC = document.getElementById('levelCanvas');
+const LX = LC.getContext('2d');
+
+let W = 1, H = 1, frame = 0;
+let audio = 0, audioTarget = 0;
+let mx = .5, my = .5;
+let lastFrameTime = performance.now(), fps = 60;
+
+/* ───────── Interaction counters ───────── */
+let moveCount = 0, clickCount = 0, keyDownCount = 0, keyUpCount = 0;
+let lastKey = '—', lastEvent = '—';
+const activeKeys = new Set();
+
+/* ───────── Capability signals ───────── */
+const capDefs = [
+  { id:'move',     label:'Move' },
+  { id:'click',    label:'Click' },
+  { id:'keydown',  label:'Key ↓' },
+  { id:'keyup',    label:'Key ↑' },
+  { id:'audio',    label:'Audio' },
+  { id:'pause',    label:'Pause' },
+  { id:'registry', label:'Registry' },
+];
+const capLife = {};
+capDefs.forEach(c => capLife[c.id] = 0);
+function ping(id) { capLife[id] = 1; }
+
+/* ───────── Visual FX state ───────── */
+const stars = [];
+const trails = [];
+const ripples = [];
+const keyBursts = [];
+
+/* ───────── Sentinel background state ───────── */
+const wardenNodes = [];     // neural mesh nodes
+const embers = [];          // floating ember particles
+const tendrils = [];        // bezier curve guardian tendrils
+let pulseWaves = [];        // heartbeat pulse waves
+let breathPhase = 0;        // breathing animation phase
+const WARDEN_NODE_COUNT = 45;
+const EMBER_COUNT = 70;
+const TENDRIL_COUNT = 6;
+const WARDEN_CONNECT_DIST = 180;
+
+/* ───────── Frequency bar graph (peak_32 from backend + synthesized) ───────── */
+const FREQ_BINS = 32;
+const peakHistory = new Float32Array(FREQ_BINS);
+const freqTargets = new Float32Array(FREQ_BINS);
+
+/* ───────── Audio Level line graph with AGC ───────── */
+const LEVEL_BUF_LEN = 300;
+const levelBuffer = new Float32Array(LEVEL_BUF_LEN);  // circular buffer of AGC-normalized values
+let levelWriteIdx = 0;
+let levelSampleCount = 0;
+
+// Temporal smoothing (EMA)
+let smoothedRawLevel = 0;
+const SMOOTH_ALPHA = 0.18;
+
+// Automatic Gain Control
+let agcPeak  = 0.01;   // tracks the signal ceiling
+let agcFloor = 0.0;    // tracks the signal floor (anti-peak)
+const AGC_PEAK_ATTACK  = 0.08;   // how fast peak rises to meet signal
+const AGC_PEAK_RELEASE = 0.0008; // how slowly peak decays when signal is lower
+const AGC_FLOOR_ATTACK = 0.0005; // how slowly floor rises toward signal
+const AGC_FLOOR_RELEASE = 0.06;  // how fast floor drops when signal goes below
+
+function agcProcess(rawLevel) {
+  // Temporal smoothing first
+  smoothedRawLevel += (rawLevel - smoothedRawLevel) * SMOOTH_ALPHA;
+  const level = smoothedRawLevel;
+
+  // Update AGC peak (fast attack, slow release)
+  if (level > agcPeak) {
+    agcPeak += (level - agcPeak) * AGC_PEAK_ATTACK;
+  } else {
+    agcPeak += (level - agcPeak) * AGC_PEAK_RELEASE;
+  }
+
+  // Update AGC floor (slow attack, fast release)
+  if (level < agcFloor) {
+    agcFloor += (level - agcFloor) * AGC_FLOOR_RELEASE;
+  } else {
+    agcFloor += (level - agcFloor) * AGC_FLOOR_ATTACK;
+  }
+
+  // Clamp
+  agcPeak  = Math.max(agcPeak, 0.002);
+  agcFloor = Math.max(0, Math.min(agcFloor, agcPeak - 0.001));
+
+  // Normalize: 0 = floor (anti-peak), 1 = peak
+  const range = agcPeak - agcFloor;
+  const normalized = range > 0.001 ? (level - agcFloor) / range : 0;
+  return Math.max(0, Math.min(1, normalized));
+}
+
+function pushLevelSample(rawLevel) {
+  const normalized = agcProcess(rawLevel);
+  levelBuffer[levelWriteIdx] = normalized;
+  levelWriteIdx = (levelWriteIdx + 1) % LEVEL_BUF_LEN;
+  levelSampleCount = Math.min(levelSampleCount + 1, LEVEL_BUF_LEN);
+}
+
+/* ═══════════════ HELPERS (SDK utilities) ═══════════════ */
+const fmtBytes = Sentinel.formatBytes;
+const fmtSpeed = Sentinel.formatSpeed;
+const fmtTemp  = Sentinel.formatTemp;
+const pct      = Sentinel.formatPercent;
+
+function barHTML(value, max, color) {
+  const p = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return `<div class="bar-wrap"><div class="bar-fill" style="width:${p.toFixed(1)}%;background:${color}"></div></div>`;
+}
+
+/* ═══════════════ UI UPDATES ═══════════════ */
+const capsEl     = document.getElementById('caps');
+const keysEl     = document.getElementById('keys');
+const clockEl    = document.getElementById('clock');
+const statusPill = document.getElementById('statusPill');
+const fpsHint    = document.getElementById('fpsHint');
+
+function initCapsUI() {
+  capsEl.innerHTML = capDefs.map(c =>
+    `<div class="cap" data-c="${c.id}"><span>${c.label}</span><span class="dot"></span></div>`
+  ).join('');
+}
+
+function tickCaps() {
+  for (const c of capDefs) {
+    capLife[c.id] *= .92;
+    const el = capsEl.querySelector(`[data-c="${c.id}"]`);
+    if (!el) continue;
+    el.classList.toggle('on', capLife[c.id] > .08);
+  }
+}
+
+function addKeyChip(label, isUp) {
+  const n = document.createElement('div');
+  n.className = 'chip';
+  n.textContent = isUp ? label + ' ↑' : label + ' ↓';
+  keysEl.prepend(n);
+  while (keysEl.children.length > 12) keysEl.removeChild(keysEl.lastChild);
+  setTimeout(() => n.remove(), 900);
+}
+
+/* ─── CPU panel ─── */
+function updateCPU(c) {
+  const el = document.getElementById('cpuInfo');
+  const usage = c.usage_percent != null ? c.usage_percent : 0;
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Model</span><span class="val">${c.brand || '—'}</span></div>
+    <div class="row"><span class="lbl">Cores</span><span class="val">${c.logical_cores || '—'}</span></div>
+    <div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>
+    ${barHTML(usage, 100, 'rgba(220,70,50,.8)')}
+    <div class="row"><span class="lbl">Frequency</span><span class="val">${c.frequency_mhz ? c.frequency_mhz + ' MHz' : '—'}</span></div>
+    <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(c.temperature)}</span></div>
+  `;
+}
+
+/* ─── GPU panel ─── */
+function updateGPU(g) {
+  const el = document.getElementById('gpuInfo');
+  const adapters = g.adapters || [];
+  const name = adapters.length > 0 ? (adapters[0].name || '—') : '—';
+  const vram = adapters.length > 0 && adapters[0].adapter_ram_bytes ? fmtBytes(adapters[0].adapter_ram_bytes) : '—';
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Adapter</span><span class="val">${name}</span></div>
+    <div class="row"><span class="lbl">VRAM</span><span class="val">${vram}</span></div>
+    <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(g.temperature)}</span></div>
+  `;
+}
+
+/* ─── RAM panel ─── */
+function updateRAM(r) {
+  const el = document.getElementById('ramInfo');
+  const usage = r.usage_percent != null ? r.usage_percent : 0;
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Total</span><span class="val">${fmtBytes(r.total_bytes)}</span></div>
+    <div class="row"><span class="lbl">Used</span><span class="val">${fmtBytes(r.used_bytes)}</span></div>
+    <div class="row"><span class="lbl">Available</span><span class="val">${fmtBytes(r.available_bytes)}</span></div>
+    <div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>
+    ${barHTML(usage, 100, 'rgba(200,80,60,.8)')}
+    <div class="row"><span class="lbl">Swap</span><span class="val">${fmtBytes(r.swap_used_bytes)} / ${fmtBytes(r.swap_total_bytes)}</span></div>
+  `;
+}
+
+/* ─── Storage panel ─── */
+function updateStorage(s) {
+  const el = document.getElementById('storageInfo');
+  const disks = s.disks || [];
+  let html = `
+    <div class="row"><span class="lbl">Total</span><span class="val">${fmtBytes(s.total_bytes)}</span></div>
+    <div class="row"><span class="lbl">Used</span><span class="val">${fmtBytes(s.used_bytes)}</span></div>
+    ${barHTML(s.used_bytes || 0, s.total_bytes || 1, 'rgba(240,150,70,.78)')}
+  `;
+  for (const d of disks.slice(0, 3)) {
+    const label = d.mount || d.name || '?';
+    const pUsed = d.total_bytes > 0 ? ((d.used_bytes / d.total_bytes) * 100) : 0;
+    html += `<div class="row"><span class="lbl">${label}</span><span class="val">${fmtBytes(d.used_bytes)} / ${fmtBytes(d.total_bytes)}</span></div>`;
+    html += barHTML(pUsed, 100, 'rgba(240,170,90,.7)');
+  }
+  el.innerHTML = html;
+}
+
+/* ─── Network panel ─── */
+function updateNetwork(n) {
+  const el = document.getElementById('networkInfo');
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Download</span><span class="val">${fmtSpeed(n.received_bytes_per_second)}</span></div>
+    <div class="row"><span class="lbl">Upload</span><span class="val">${fmtSpeed(n.transmitted_bytes_per_second)}</span></div>
+    <div class="row"><span class="lbl">Total ↓</span><span class="val">${fmtBytes(n.total_received_bytes)}</span></div>
+    <div class="row"><span class="lbl">Total ↑</span><span class="val">${fmtBytes(n.total_transmitted_bytes)}</span></div>
+  `;
+}
+
+/* ─── Audio device info (right panel) ─── */
+function updateAudioStats(a) {
+  const el = document.getElementById('audioStats');
+  const out = a.output_device || {};
+  const lvl = out.levels || {};
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Device</span><span class="val">${out.name || '—'}</span></div>
+    <div class="row"><span class="lbl">Volume</span><span class="val">${out.volume_percent != null ? out.volume_percent + '%' : '—'}</span></div>
+    <div class="row"><span class="lbl">Muted</span><span class="val">${out.muted ? 'Yes' : 'No'}</span></div>
+    <div class="row"><span class="lbl">Peak</span><span class="val">${lvl.peak != null ? (lvl.peak * 100).toFixed(1) + '%' : '—'}</span></div>
+    <div class="row"><span class="lbl">RMS</span><span class="val">${lvl.rms != null ? (lvl.rms * 100).toFixed(1) + '%' : '—'}</span></div>
+    ${barHTML((lvl.smoothed_peak || 0) * 100, 100, 'rgba(255,140,60,.8)')}
+  `;
+
+  /* Update peak_32 frequency data from backend */
+  if (out.history && out.history.peak_32) {
+    const src = out.history.peak_32;
+    for (let i = 0; i < 32; i++) {
+      peakHistory[i] = src[i] != null ? src[i] : 0;
+    }
+  }
+}
+
+/* ─── Power panel ─── */
+function updatePower(p) {
+  const el = document.getElementById('powerInfo');
+  const hasBattery = p.has_battery === true;
+  const pct_val = p.battery_percent != null ? p.battery_percent : null;
+  const status = p.power_status || p.ac_status || '—';
+  const saver = p.battery_saver === true;
+  let html = `<div class="row"><span class="lbl">AC / Battery</span><span class="val">${status}</span></div>`;
+  if (hasBattery && pct_val != null) {
+    html += `<div class="row"><span class="lbl">Battery</span><span class="val">${pct_val}%</span></div>`;
+    html += barHTML(pct_val, 100, 'rgba(100,200,120,.8)');
+    if (p.remaining_seconds != null && p.remaining_seconds > 0) {
+      const mins = Math.floor(p.remaining_seconds / 60);
+      const hrs = Math.floor(mins / 60);
+      const m = mins % 60;
+      html += `<div class="row"><span class="lbl">Remaining</span><span class="val">${hrs}h ${m}m</span></div>`;
+    }
+    if (saver) html += `<div class="row"><span class="lbl">Battery Saver</span><span class="val">On</span></div>`;
+  } else {
+    html += `<div class="row"><span class="lbl">Battery</span><span class="val">N/A</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+/* ─── System info panel ─── */
+function updateSystem(s) {
+  const el = document.getElementById('systemInfo');
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Hostname</span><span class="val">${s.hostname || '—'}</span></div>
+    <div class="row"><span class="lbl">OS</span><span class="val">${s.os_name || s.os || '—'}</span></div>
+    <div class="row"><span class="lbl">Version</span><span class="val">${s.os_version || '—'}</span></div>
+    <div class="row"><span class="lbl">Uptime</span><span class="val">${s.uptime_seconds != null ? fmtUptime(s.uptime_seconds) : '—'}</span></div>
+    <div class="row"><span class="lbl">Arch</span><span class="val">${s.architecture || s.arch || '—'}</span></div>
+  `;
+}
+
+function fmtUptime(sec) {
+  if (sec == null) return '—';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  let s = '';
+  if (d > 0) s += d + 'd ';
+  if (h > 0 || d > 0) s += h + 'h ';
+  s += m + 'm';
+  return s.trim();
+}
+
+/* ─── Wi-Fi panel ─── */
+function updateWifi(w) {
+  const el = document.getElementById('wifiInfo');
+  const connected = w.connected === true;
+  const ssid = w.ssid || '—';
+  const signal = w.signal_percent != null ? w.signal_percent : null;
+  let html = `<div class="row"><span class="lbl">Status</span><span class="val">${connected ? 'Connected' : 'Disconnected'}</span></div>`;
+  if (connected) {
+    html += `<div class="row"><span class="lbl">SSID</span><span class="val">${ssid}</span></div>`;
+    if (signal != null) {
+      html += `<div class="row"><span class="lbl">Signal</span><span class="val">${signal}%</span></div>`;
+      html += barHTML(signal, 100, 'rgba(80,180,255,.75)');
+    }
+    if (w.frequency_mhz) html += `<div class="row"><span class="lbl">Freq</span><span class="val">${w.frequency_mhz} MHz</span></div>`;
+    if (w.channel) html += `<div class="row"><span class="lbl">Channel</span><span class="val">${w.channel}</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+/* ─── Bluetooth panel ─── */
+function updateBluetooth(b) {
+  const el = document.getElementById('btInfo');
+  const available = b.available === true || b.enabled === true;
+  const devices = b.devices || b.connected_devices || [];
+  let html = `<div class="row"><span class="lbl">Status</span><span class="val">${available ? 'Available' : 'Off'}</span></div>`;
+  if (devices.length > 0) {
+    html += `<div class="row"><span class="lbl">Devices</span><span class="val">${devices.length}</span></div>`;
+    for (const d of devices.slice(0, 4)) {
+      const name = typeof d === 'string' ? d : (d.name || '?');
+      html += `<div class="row"><span class="lbl" style="padding-left:8px">·</span><span class="val">${name}</span></div>`;
+    }
+  } else {
+    html += `<div class="row"><span class="lbl">Devices</span><span class="val">0</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+/* ─── Idle panel ─── */
+function updateIdle(d) {
+  const el = document.getElementById('idleInfo');
+  const sec = d.idle_seconds != null ? d.idle_seconds : (d.idle_time_ms != null ? Math.floor(d.idle_time_ms / 1000) : null);
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Idle Time</span><span class="val">${sec != null ? fmtUptime(sec) : '—'}</span></div>
+    <div class="row"><span class="lbl">Is Idle</span><span class="val">${d.is_idle === true ? 'Yes' : 'No'}</span></div>
+  `;
+}
+
+/* ─── Displays panel ─── */
+function updateDisplays(monitors) {
+  const el = document.getElementById('displayInfo');
+  if (!monitors || !monitors.length) {
+    el.innerHTML = `<div class="row"><span class="lbl">No display data</span></div>`;
+    return;
+  }
+  let html = `<div class="row"><span class="lbl">Monitors</span><span class="val">${monitors.length}</span></div>`;
+  for (const m of monitors.slice(0, 4)) {
+    const label = m.primary ? '★ Primary' : (m.device_name || 'Display');
+    const res = `${m.width || '?'}×${m.height || '?'}`;
+    const hz = m.refresh_rate_hz ? ` @ ${m.refresh_rate_hz}Hz` : '';
+    html += `<div class="row"><span class="lbl">${label}</span><span class="val">${res}${hz}</span></div>`;
+    if (m.scale && m.scale !== 1) {
+      html += `<div class="row"><span class="lbl" style="padding-left:8px">Scale</span><span class="val">${(m.scale * 100).toFixed(0)}%</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+/* ─── Processes panel ─── */
+function updateProcesses(p) {
+  const el = document.getElementById('processInfo');
+  const total = p.total != null ? p.total : (p.count != null ? p.count : '—');
+  const topCpu = (p.top_cpu || []).slice(0, 3);
+  const topMem = (p.top_memory || []).slice(0, 3);
+  let html = `<div class="row"><span class="lbl">Total</span><span class="val">${total}</span></div>`;
+  if (topCpu.length > 0) {
+    html += `<div class="row"><span class="lbl" style="color:rgba(255,130,110,.6)">Top CPU</span><span class="val"></span></div>`;
+    for (const proc of topCpu) {
+      const name = proc.name || '?';
+      const cpu = proc.cpu_percent != null ? proc.cpu_percent.toFixed(1) + '%' : '';
+      html += `<div class="row"><span class="lbl" style="padding-left:8px">${name}</span><span class="val">${cpu}</span></div>`;
+    }
+  }
+  if (topMem.length > 0) {
+    html += `<div class="row"><span class="lbl" style="color:rgba(255,130,110,.6)">Top Memory</span><span class="val"></span></div>`;
+    for (const proc of topMem) {
+      const name = proc.name || '?';
+      const mem = proc.memory_bytes != null ? fmtBytes(proc.memory_bytes) : '';
+      html += `<div class="row"><span class="lbl" style="padding-left:8px">${name}</span><span class="val">${mem}</span></div>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
+/* ─── Media session (inside audio subscription) ─── */
+function updateMediaSession(a) {
+  const el = document.getElementById('mediaInfo');
+  const ms = a.media_session;
+  if (!ms || ms.playing === false && !ms.title) {
+    el.innerHTML = `<div class="row"><span class="lbl">Nothing playing</span></div>`;
+    return;
+  }
+  const status = ms.playback_status || (ms.playing ? 'playing' : 'stopped');
+  let html = `<div class="row"><span class="lbl">Status</span><span class="val">${status}</span></div>`;
+  if (ms.title) html += `<div class="row"><span class="lbl">Title</span><span class="val">${ms.title}</span></div>`;
+  if (ms.artist) html += `<div class="row"><span class="lbl">Artist</span><span class="val">${ms.artist}</span></div>`;
+  if (ms.album) html += `<div class="row"><span class="lbl">Album</span><span class="val">${ms.album}</span></div>`;
+  if (ms.timeline && ms.timeline.duration_ms > 0) {
+    const pos = ms.timeline.position_ms || 0;
+    const dur = ms.timeline.duration_ms;
+    html += `<div class="row"><span class="lbl">Progress</span><span class="val">${fmtTimeMs(pos)} / ${fmtTimeMs(dur)}</span></div>`;
+    html += barHTML(pos, dur, 'rgba(180,120,255,.7)');
+  }
+  if (ms.shuffle === true) html += `<div class="row"><span class="lbl">Shuffle</span><span class="val">On</span></div>`;
+  if (ms.repeat_mode && ms.repeat_mode !== 'none') html += `<div class="row"><span class="lbl">Repeat</span><span class="val">${ms.repeat_mode}</span></div>`;
+  el.innerHTML = html;
+}
+
+function fmtTimeMs(ms) {
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+/* ─── Interaction stats ─── */
+function updateInterStats() {
+  const el = document.getElementById('interStats');
+  el.innerHTML = `
+    <div class="row"><span class="lbl">Mouse Pos</span><span class="val">${(mx*100).toFixed(1)}%, ${(my*100).toFixed(1)}%</span></div>
+    <div class="row"><span class="lbl">Moves</span><span class="val">${moveCount}</span></div>
+    <div class="row"><span class="lbl">Clicks</span><span class="val">${clickCount}</span></div>
+    <div class="row"><span class="lbl">Keys ↓/↑</span><span class="val">${keyDownCount} / ${keyUpCount}</span></div>
+    <div class="row"><span class="lbl">Held</span><span class="val">${activeKeys.size}</span></div>
+    <div class="row"><span class="lbl">Last Key</span><span class="val">${lastKey}</span></div>
+  `;
+}
+
+/* ═══════════════ SENTINEL SDK SUBSCRIPTIONS ═══════════════ */
+function stamp() { return new Date().toLocaleTimeString(); }
+
+Sentinel.subscribe('cpu',     c => updateCPU(c));
+Sentinel.subscribe('gpu',     g => updateGPU(g));
+Sentinel.subscribe('ram',     r => updateRAM(r));
+Sentinel.subscribe('storage', s => updateStorage(s));
+Sentinel.subscribe('network', n => updateNetwork(n));
+Sentinel.subscribe('audio',   a => { updateAudioStats(a); updateMediaSession(a); });
+Sentinel.subscribe('power',     p => updatePower(p));
+Sentinel.subscribe('system',    s => updateSystem(s));
+Sentinel.subscribe('wifi',      w => updateWifi(w));
+Sentinel.subscribe('bluetooth', b => updateBluetooth(b));
+Sentinel.subscribe('idle',      d => updateIdle(d));
+Sentinel.subscribe('processes', p => updateProcesses(p));
+
+// Displays come as separate entries; use the raw registry event
+let _displaysHandled = false;
+Sentinel.on('registry', d => {
+  // Displays are individual sysdata entries with category "display"
+  // The SDK maps full sysdata as d.sysdata; we also look for 'displays' key
+  if (d && d.sysdata) {
+    const disp = d.sysdata.displays;
+    if (disp) {
+      updateDisplays(Array.isArray(disp) ? disp : (disp.monitors || []));
+    }
+  }
+  ping('registry');
+});
+
+// Audio level — feed into AGC line graph + frequency bins + visual reactivity
+Sentinel.on('audio', e => {
+  const raw = Math.max(0, Math.min(1, e.level));
+  audioTarget = Math.max(audioTarget * .7, Math.pow(Math.min(1, raw * 5), .55));
+  ping('audio');
+  pushLevelSample(raw);
+
+  // Synthesize frequency bin targets from single audio level
+  const boosted = Math.pow(Math.min(1, raw * 6), .45); // heavy boost for small values
+  for (let i = 0; i < FREQ_BINS; i++) {
+    const freq = i / FREQ_BINS;
+    const bass   = Math.max(0, 1 - freq * 2.5) * boosted * 1.8;
+    const mid    = Math.max(0, 1 - Math.abs(freq - .35) * 3.5) * boosted * 1.4;
+    const treble = Math.max(0, freq * 2.2 - 1) * boosted * 1.1;
+    const val = Math.min(1, (bass + mid + treble) * (.4 + Math.random() * .6));
+    freqTargets[i] = Math.max(freqTargets[i], val);
+  }
+});
+
+Sentinel.on('move', e => {
+  mx = Number.isFinite(e.nx) ? e.nx : .5;
+  my = Number.isFinite(e.ny) ? e.ny : .5;
+  moveCount++;
+  ping('move');
+  lastEvent = stamp();
+  trails.push({ x: mx * W, y: my * H, life: 1 });
+  while (trails.length > 100) trails.shift();
+});
+
+Sentinel.on('click', e => {
+  const cx = (Number.isFinite(e.nx) ? e.nx : .5) * W;
+  const cy = (Number.isFinite(e.ny) ? e.ny : .5) * H;
+  clickCount++;
+  ping('click');
+  lastEvent = stamp();
+  ripples.push({ x: cx, y: cy, r: 0, life: 1, hue: Math.random() * 40 });
+});
+
+Sentinel.on('keydown', e => {
+  const key = e.key || '?';
+  lastKey = key;
+  lastEvent = stamp();
+  keyDownCount++;
+  activeKeys.add(key);
+  ping('keydown');
+  addKeyChip(key, false);
+  keyBursts.push({ x: W * (.15 + Math.random() * .7), y: H * (.15 + Math.random() * .6), life: 1, hue: Math.random() * 40 });
+});
+
+Sentinel.on('keyup', e => {
+  const key = e.key || '?';
+  lastKey = key;
+  lastEvent = stamp();
+  keyUpCount++;
+  activeKeys.delete(key);
+  ping('keyup');
+  addKeyChip(key, true);
+});
+
+Sentinel.on('pause', () => {
+  ping('pause');
+  lastEvent = stamp();
+  statusPill.textContent = 'paused';
+});
+
+Sentinel.on('resume', () => {
+  ping('pause');
+  lastEvent = stamp();
+  statusPill.textContent = 'running';
+});
+
+/* ═══════════════ DRAWING ═══════════════ */
+function resize() {
+  W = C.width  = innerWidth;
+  H = C.height = innerHeight;
+
+  // Size both canvases to the same container (they overlap)
+  const vp = FC.parentElement;
+  if (vp) {
+    const cw = vp.clientWidth - 24;
+    const ch = vp.clientHeight - 38;
+    FC.width = cw; FC.height = ch;
+    LC.width = cw; LC.height = ch;
+  }
+
+  if (!stars.length) {
+    for (let i = 0; i < 160; i++) stars.push({
+      x: Math.random() * W, y: Math.random() * H,
+      z: .1 + Math.random() * 1.3, t: Math.random() * 6.28,
+      brightness: .15 + Math.random() * .4
+    });
+  }
+
+  // Generate warden mesh nodes
+  wardenNodes.length = 0;
+  for (let i = 0; i < WARDEN_NODE_COUNT; i++) {
+    wardenNodes.push({
+      baseX: Math.random() * W, baseY: Math.random() * H,
+      x: 0, y: 0,
+      phase: Math.random() * 6.28,
+      size: 1.5 + Math.random() * 2.5
+    });
+  }
+
+  // Generate embers
+  embers.length = 0;
+  for (let i = 0; i < EMBER_COUNT; i++) {
+    embers.push({
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - .5) * .5, vy: -(Math.random() * .4 + .1),
+      size: .5 + Math.random() * 2.5,
+      brightness: .3 + Math.random() * .7,
+      phase: Math.random() * 6.28
+    });
+  }
+
+  // Generate guardian tendrils (bezier control points)
+  tendrils.length = 0;
+  for (let i = 0; i < TENDRIL_COUNT; i++) {
+    const angle = (i / TENDRIL_COUNT) * Math.PI * 2;
+    const len = Math.min(W, H) * (.25 + Math.random() * .2);
+    tendrils.push({
+      angle,
+      length: len,
+      phase: Math.random() * 6.28,
+      speed: .003 + Math.random() * .004,
+      amplitude: 20 + Math.random() * 40,
+      nodes: 5 + Math.floor(Math.random() * 4)
+    });
+  }
+}
+
+// ── Theme color cache (read from CSS variables once per frame) ──
+let acR = 200, acG = 50, acB = 40;
+let emR = 255, emG = 170, emB = 60;
+let bgR = 10, bgG = 4, bgB = 6;
+
+function _hexRgb(h) {
+  h = (h || '').replace('#', '');
+  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  return [parseInt(h.substring(0,2),16)||0, parseInt(h.substring(2,4),16)||0, parseInt(h.substring(4,6),16)||0];
+}
+
+function readThemeVars() {
+  const s = getComputedStyle(document.documentElement);
+  const _i = (v, d) => { const n = parseInt(v); return Number.isFinite(n) ? n : d; };
+  const _f = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
+  acR = _i(s.getPropertyValue('--accent-r'), 200);
+  acG = _i(s.getPropertyValue('--accent-g'), 50);
+  acB = _i(s.getPropertyValue('--accent-b'), 40);
+  emR = _i(s.getPropertyValue('--ember-r'), 255);
+  emG = _i(s.getPropertyValue('--ember-g'), 170);
+  emB = _i(s.getPropertyValue('--ember-b'), 60);
+  const bg = _hexRgb(s.getPropertyValue('--bg-color'));
+  bgR = bg[0]; bgG = bg[1]; bgB = bg[2];
+  if (!bgR && !bgG && !bgB) { bgR = 10; bgG = 4; bgB = 6; } // fallback for missing var
+}
+
+// Scaled accent "R,G,B" string (all channels scaled uniformly by f)
+function _a(f) { return `${Math.min(255,acR*f)|0},${Math.min(255,acG*f)|0},${Math.min(255,acB*f)|0}`; }
+// Ember "R,G,B" string (R stays at emR, G scaled by gf, B scaled by bf)
+function _e(gf, bf) { if (bf === undefined) bf = gf; return `${emR},${Math.min(255,emG*gf)|0},${Math.min(255,emB*bf)|0}`; }
+
+function drawBG() {
+  const parallaxX = (mx - .5) * 70;
+  const parallaxY = (my - .5) * 45;
+  const cx = W * .5 + parallaxX;
+  const cy = H * .46 + parallaxY;
+  breathPhase += .015;
+
+  // Deep crimson background gradient
+  const bg = X.createRadialGradient(cx, cy, 0, W * .5, H * .5, Math.max(W, H) * .85);
+  bg.addColorStop(0, `rgba(${_a(.3)},${(.35 + audio * .15).toFixed(3)})`);
+  bg.addColorStop(.3, `rgba(${_a(.15)},${(.5 + audio * .08).toFixed(3)})`);
+  bg.addColorStop(.7, `rgba(${_a(.06)},${(.75 + audio * .04).toFixed(3)})`);
+  bg.addColorStop(1, `rgb(${_a(.04)})`);
+  X.fillStyle = bg;
+  X.fillRect(0, 0, W, H);
+
+  X.globalCompositeOperation = 'screen';
+
+  // ── Diamond lattice background ──
+  const latticePx = parallaxX * .08;
+  const latticePy = parallaxY * .08;
+  const spacing = 80;
+  X.strokeStyle = `rgba(${_a(.6)},${(.03 + audio * .015).toFixed(3)})`;
+  X.lineWidth = .4;
+  for (let i = -H; i < W + H; i += spacing) {
+    X.beginPath();
+    X.moveTo(i + latticePx, 0 + latticePy);
+    X.lineTo(i + H + latticePx, H + latticePy);
+    X.stroke();
+    X.beginPath();
+    X.moveTo(i + latticePx, 0 + latticePy);
+    X.lineTo(i - H + latticePx, H + latticePy);
+    X.stroke();
+  }
+
+  // ── Star field with warm tint ──
+  for (const s of stars) {
+    s.t += .003 * s.z;
+    const sx = s.x + parallaxX * s.z * .25;
+    const sy = s.y + parallaxY * s.z * .25;
+    const twinkle = s.brightness + Math.sin(s.t + frame * .002) * .12;
+    const a = twinkle * (.1 + audio * .08);
+    const r = Math.min(255, 140 + (acR * .3 | 0) + Math.floor(s.brightness * 55));
+    const g = Math.min(255, 140 + (acG * .4 | 0) + Math.floor(s.brightness * 40));
+    const b = Math.min(255, 130 + (acB * .25 | 0) + Math.floor(s.brightness * 30));
+    X.fillStyle = `rgba(${r},${g},${b},${Math.max(0, a).toFixed(3)})`;
+    const sz = .5 + s.z * .8;
+    X.fillRect(sx, sy, sz, sz);
+  }
+
+  // ── Warden mesh (neural network) ──
+  const meshPx = parallaxX * .12;
+  const meshPy = parallaxY * .12;
+  for (const n of wardenNodes) {
+    n.phase += .01;
+    n.x = n.baseX + Math.sin(n.phase) * 25 + Math.cos(n.phase * .7) * 15;
+    n.y = n.baseY + Math.cos(n.phase * .8) * 20 + Math.sin(n.phase * .5) * 10;
+    // Audio breathing
+    const breathOffset = Math.sin(breathPhase) * 8 * audio;
+    const dx = n.x - W * .5, dy = n.y - H * .5;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const norm = dist > 1 ? 1 / dist : 1;
+    n.x += dx * norm * breathOffset;
+    n.y += dy * norm * breathOffset;
+  }
+
+  // Draw connections
+  for (let i = 0; i < wardenNodes.length; i++) {
+    const a = wardenNodes[i];
+    const ax = a.x + meshPx, ay = a.y + meshPy;
+    for (let j = i + 1; j < wardenNodes.length; j++) {
+      const b = wardenNodes[j];
+      const bx = b.x + meshPx, by = b.y + meshPy;
+      const d = Math.hypot(ax - bx, ay - by);
+      if (d < WARDEN_CONNECT_DIST) {
+        const fade = 1 - d / WARDEN_CONNECT_DIST;
+        const alpha = fade * (.06 + audio * .04);
+        X.strokeStyle = `rgba(${_a(1)},${alpha.toFixed(3)})`;
+        X.lineWidth = fade * 1.2;
+        X.beginPath(); X.moveTo(ax, ay); X.lineTo(bx, by); X.stroke();
+      }
+    }
+  }
+
+  // Draw nodes as diamonds
+  for (const n of wardenNodes) {
+    const nx = n.x + meshPx, ny = n.y + meshPy;
+    if (nx < -20 || nx > W + 20 || ny < -20 || ny > H + 20) continue;
+    const d = Math.hypot(nx - cx, ny - cy) / Math.max(W, H);
+    const fade = Math.max(0, 1 - d * 1.8);
+    if (fade < .02) continue;
+    const alpha = (.15 + audio * .1) * fade;
+    const s = n.size * (1 + audio * .3);
+    X.fillStyle = `rgba(${_a(1.1)},${alpha.toFixed(3)})`;
+    X.save();
+    X.translate(nx, ny);
+    X.rotate(Math.PI / 4);
+    X.fillRect(-s / 2, -s / 2, s, s);
+    X.restore();
+  }
+
+  // ── Ember field ──
+  for (const e of embers) {
+    e.phase += .008 + audio * .01;
+    e.x += e.vx + Math.sin(e.phase) * .4;
+    e.y += e.vy * (1 + audio * 1.5);
+    // Gentle attraction toward center
+    const dx = cx - e.x, dy = cy - e.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 50) { e.x += dx / d * .08; e.y += dy / d * .08; }
+    // Wrap around
+    if (e.y < -30) { e.y = H + 30; e.x = Math.random() * W; }
+    if (e.x < -30 || e.x > W + 30) { e.x = Math.random() * W; e.y = Math.random() * H; }
+
+    const ex = e.x + parallaxX * .15;
+    const ey = e.y + parallaxY * .15;
+    const ea = e.brightness * (.12 + audio * .1);
+    // Glow
+    const eg = X.createRadialGradient(ex, ey, 0, ex, ey, e.size * 3);
+    eg.addColorStop(0, `rgba(${emR},${Math.floor(emG * .7 + e.brightness * 80)},${Math.floor(emB * .67 + e.brightness * 40)},${(ea * .8).toFixed(3)})`);
+    eg.addColorStop(.5, `rgba(${_a(1)},${(ea * .3).toFixed(3)})`);
+    eg.addColorStop(1, 'rgba(0,0,0,0)');
+    X.fillStyle = eg;
+    X.beginPath(); X.arc(ex, ey, e.size * 3, 0, Math.PI * 2); X.fill();
+    // Core dot
+    X.fillStyle = `rgba(${_e(1.18,2.5)},${(ea * 1.5).toFixed(3)})`;
+    X.fillRect(ex - .5, ey - .5, 1, 1);
+  }
+
+  // ── Heartbeat pulse spawn ──
+  if (frame % Math.max(8, Math.floor(40 - audio * 25)) === 0 && audio > .05) {
+    pulseWaves.push({ r: 10, life: 1, maxR: Math.max(W, H) * .6 });
+  }
+
+  X.globalCompositeOperation = 'source-over';
+}
+
+function drawCore() {
+  const cx = W * .5 + (mx - .5) * 40;
+  const cy = H * .46 + (my - .5) * 28;
+  const baseR = Math.min(W, H) * .1;
+  const r = baseR + audio * 25 + Math.sin(breathPhase) * 4;
+
+  X.globalCompositeOperation = 'screen';
+
+  // ── Ambient glow ──
+  const g = X.createRadialGradient(cx, cy, 0, cx, cy, r * 4.5);
+  g.addColorStop(0, `rgba(${_a(.9)},${(.18 + audio * .12).toFixed(3)})`);
+  g.addColorStop(.15, `rgba(${_a(.6)},${(.1 + audio * .06).toFixed(3)})`);
+  g.addColorStop(.4, `rgba(${_a(.3)},${(.04 + audio * .02).toFixed(3)})`);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  X.fillStyle = g;
+  X.fillRect(0, 0, W, H);
+
+  // ── Guardian tendrils (flowing bezier curves from center) ──
+  for (const t of tendrils) {
+    t.phase += t.speed * (1 + audio * 2);
+    const endDist = t.length * (1 + audio * .3 + Math.sin(breathPhase) * .05);
+    const segments = 30;
+    X.beginPath();
+    for (let s = 0; s <= segments; s++) {
+      const frac = s / segments;
+      const baseAng = t.angle + Math.sin(t.phase + frac * 3) * .15 * frac;
+      const dist = frac * endDist;
+      const wave = Math.sin(t.phase * 2 + frac * 8) * t.amplitude * frac * frac;
+      const perpAng = baseAng + Math.PI / 2;
+      const px = cx + Math.cos(baseAng) * dist + Math.cos(perpAng) * wave;
+      const py = cy + Math.sin(baseAng) * dist + Math.sin(perpAng) * wave;
+      s === 0 ? X.moveTo(px, py) : X.lineTo(px, py);
+    }
+    const tendrilAlpha = .08 + audio * .06;
+    X.strokeStyle = `rgba(${_a(1)},${tendrilAlpha.toFixed(3)})`;
+    X.lineWidth = 1.5;
+    X.stroke();
+    // Glow version
+    X.strokeStyle = `rgba(${_a(.9)},${(tendrilAlpha * .4).toFixed(3)})`;
+    X.lineWidth = 4;
+    X.stroke();
+
+    // Nodes along tendril
+    for (let s = 1; s <= t.nodes; s++) {
+      const frac = s / (t.nodes + 1);
+      const baseAng = t.angle + Math.sin(t.phase + frac * 3) * .15 * frac;
+      const dist = frac * endDist;
+      const wave = Math.sin(t.phase * 2 + frac * 8) * t.amplitude * frac * frac;
+      const perpAng = baseAng + Math.PI / 2;
+      const nx = cx + Math.cos(baseAng) * dist + Math.cos(perpAng) * wave;
+      const ny = cy + Math.sin(baseAng) * dist + Math.sin(perpAng) * wave;
+      X.fillStyle = `rgba(${_e(.59,1)},${(.15 + audio * .1).toFixed(3)})`;
+      X.beginPath(); X.arc(nx, ny, 2 + audio * 2, 0, Math.PI * 2); X.fill();
+    }
+  }
+
+  // ── Nested diamond sigil ──
+  const diamonds = [
+    { scale: .3, rot: frame * .006, width: 2, alpha: .35 },
+    { scale: .55, rot: -frame * .004, width: 1.5, alpha: .25 },
+    { scale: .85, rot: frame * .003, width: 1.2, alpha: .18 },
+    { scale: 1.2, rot: -frame * .002, width: .8, alpha: .1 },
+    { scale: 1.6, rot: frame * .0015, width: .6, alpha: .06 },
+  ];
+
+  for (const d of diamonds) {
+    const dr = r * d.scale * (1 + audio * .15);
+    const alpha = d.alpha + audio * .1;
+    X.strokeStyle = `rgba(${_a(1.1)},${alpha.toFixed(3)})`;
+    X.lineWidth = d.width;
+    X.save();
+    X.translate(cx, cy);
+    X.rotate(d.rot);
+    X.beginPath();
+    X.moveTo(0, -dr);
+    X.lineTo(dr, 0);
+    X.lineTo(0, dr);
+    X.lineTo(-dr, 0);
+    X.closePath();
+    X.stroke();
+    X.restore();
+  }
+
+  // ── Inner connecting circle ──
+  const circR = r * .45 * (1 + audio * .1);
+  X.strokeStyle = `rgba(${_a(1)},${(.12 + audio * .06).toFixed(3)})`;
+  X.lineWidth = .8;
+  X.beginPath(); X.arc(cx, cy, circR, 0, Math.PI * 2); X.stroke();
+
+  // Outer circle
+  const outerCircR = r * 1.1 * (1 + audio * .08);
+  X.strokeStyle = `rgba(${_a(.9)},${(.07 + audio * .04).toFixed(3)})`;
+  X.lineWidth = .6;
+  X.beginPath(); X.arc(cx, cy, outerCircR, 0, Math.PI * 2); X.stroke();
+
+  // ── Core pulse ──
+  const coreR = 5 + audio * 10 + Math.sin(breathPhase * 2) * 2;
+  const coreG = X.createRadialGradient(cx, cy, 0, cx, cy, coreR * 5);
+  coreG.addColorStop(0, `rgba(${_e(1.18,2.67)},${(.5 + audio * .3).toFixed(3)})`);
+  coreG.addColorStop(.15, `rgba(${_e(.47,.67)},${(.3 + audio * .2).toFixed(3)})`);
+  coreG.addColorStop(.4, `rgba(${_a(.9)},${(.1 + audio * .08).toFixed(3)})`);
+  coreG.addColorStop(1, 'rgba(0,0,0,0)');
+  X.fillStyle = coreG;
+  X.beginPath(); X.arc(cx, cy, coreR * 5, 0, Math.PI * 2); X.fill();
+  // Bright center
+  X.fillStyle = `rgba(${_e(1.41,3.67)},${(.6 + audio * .3).toFixed(3)})`;
+  X.beginPath(); X.arc(cx, cy, coreR * .4, 0, Math.PI * 2); X.fill();
+
+  // ── Heartbeat pulse waves (diamond-shaped) ──
+  for (let i = pulseWaves.length - 1; i >= 0; i--) {
+    const pw = pulseWaves[i];
+    pw.r += (pw.maxR - pw.r) * .035;
+    pw.life -= .01;
+    if (pw.life <= 0) { pulseWaves.splice(i, 1); continue; }
+    X.strokeStyle = `rgba(${_a(1)},${(pw.life * .15).toFixed(3)})`;
+    X.lineWidth = 1.5 + pw.life * 1.5;
+    const pr = pw.r;
+    X.beginPath();
+    X.moveTo(cx, cy - pr);
+    X.lineTo(cx + pr, cy);
+    X.lineTo(cx, cy + pr);
+    X.lineTo(cx - pr, cy);
+    X.closePath();
+    X.stroke();
+  }
+
+  // ── Sentinel text arc ──
+  X.save();
+  X.translate(cx, cy);
+  X.rotate(-frame * .0015);
+  const textR = r * 1.4;
+  X.font = '9px Consolas, monospace';
+  X.fillStyle = `rgba(${_a(1)},${(.1 + audio * .05).toFixed(3)})`;
+  const label = '◈ SENTINEL ◈ VIGILANT ◈ GUARDIAN ◈ ';
+  const charAngle = (Math.PI * 2) / label.length;
+  for (let i = 0; i < label.length; i++) {
+    const a = charAngle * i;
+    X.save();
+    X.rotate(a);
+    X.translate(0, -textR);
+    X.rotate(Math.PI);
+    X.scale(1, -1);
+    X.fillText(label[i], 0, 0);
+    X.restore();
+  }
+  X.restore();
+
+  X.globalCompositeOperation = 'source-over';
+
+  // ── Key bursts (diamond expand) ──
+  for (let i = keyBursts.length - 1; i >= 0; i--) {
+    const b = keyBursts[i];
+    b.life -= .018;
+    if (b.life <= 0) { keyBursts.splice(i, 1); continue; }
+    const br = (1 - b.life) * 70;
+    X.strokeStyle = `rgba(${emR},${Math.floor(emG * .47 + b.hue % 100)},${Math.floor(emB * .67 + b.hue % 60)},${(b.life * .3).toFixed(3)})`;
+    X.lineWidth = 1.5;
+    X.beginPath();
+    X.moveTo(b.x, b.y - br);
+    X.lineTo(b.x + br, b.y);
+    X.lineTo(b.x, b.y + br);
+    X.lineTo(b.x - br, b.y);
+    X.closePath(); X.stroke();
+    // Inner glow ring
+    X.strokeStyle = `rgba(${_e(.88,1.33)},${(b.life * .12).toFixed(3)})`;
+    X.lineWidth = .6;
+    X.beginPath(); X.arc(b.x, b.y, br * .5, 0, Math.PI * 2); X.stroke();
+  }
+}
+
+function drawTrailsAndRipples() {
+  // Mouse trails — ember sparks
+  for (let i = trails.length - 1; i >= 0; i--) {
+    const t = trails[i];
+    t.life -= .025;
+    if (t.life <= 0) { trails.splice(i, 1); continue; }
+    const tg = X.createRadialGradient(t.x, t.y, 0, t.x, t.y, 4 + (1 - t.life) * 5);
+    tg.addColorStop(0, `rgba(${_e(.94,1.33)},${(t.life * .4).toFixed(3)})`);
+    tg.addColorStop(.4, `rgba(${_a(1)},${(t.life * .15).toFixed(3)})`);
+    tg.addColorStop(1, 'rgba(0,0,0,0)');
+    X.fillStyle = tg;
+    X.beginPath(); X.arc(t.x, t.y, 4 + (1 - t.life) * 5, 0, Math.PI * 2); X.fill();
+    if (i > 0 && trails[i - 1].life > 0) {
+      X.strokeStyle = `rgba(${_a(1.1)},${(t.life * .1).toFixed(3)})`;
+      X.lineWidth = .5;
+      X.beginPath(); X.moveTo(t.x, t.y); X.lineTo(trails[i - 1].x, trails[i - 1].y); X.stroke();
+    }
+  }
+  // Click ripples — diamond expand
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const r = ripples[i];
+    r.r += 4;
+    r.life -= .015;
+    if (r.life <= 0) { ripples.splice(i, 1); continue; }
+    X.strokeStyle = `rgba(${emR},${Math.floor(emG * .47 + r.hue % 100)},${Math.floor(emB * .67 + r.hue % 60)},${(r.life * .3).toFixed(3)})`;
+    X.lineWidth = 1.5;
+    X.beginPath();
+    X.moveTo(r.x, r.y - r.r);
+    X.lineTo(r.x + r.r, r.y);
+    X.lineTo(r.x, r.y + r.r);
+    X.lineTo(r.x - r.r, r.y);
+    X.closePath(); X.stroke();
+    X.strokeStyle = `rgba(${_e(.82,1.33)},${(r.life * .12).toFixed(3)})`;
+    X.lineWidth = .8;
+    X.beginPath(); X.arc(r.x, r.y, r.r * .55, 0, Math.PI * 2); X.stroke();
+  }
+}
+
+/* ─── Frequency Bar Graph (bottom-left) ─── */
+function drawFrequency() {
+  const cw = FC.width, ch = FC.height;
+  if (cw < 2 || ch < 2) return;
+  FX.clearRect(0, 0, cw, ch);
+
+  const n = FREQ_BINS;
+  const gap = 2;
+  const bw = (cw - gap * (n + 1)) / n;
+  const maxH = ch - 6;
+
+  for (let i = 0; i < n; i++) {
+    const v = peakHistory[i];
+    const bh = Math.max(1, v * maxH);
+    const x = gap + i * (bw + gap);
+    const y = ch - bh - 3;
+    const t = i / (n - 1);
+
+    // Gradient per bar — interpolate accent → ember
+    const grad = FX.createLinearGradient(x, ch - 3, x, y);
+    const fR = acR + (emR - acR) * t | 0, fG = acG + (emG - acG) * t | 0, fB = acB + (emB - acB) * t | 0;
+    grad.addColorStop(0, `rgba(${fR*.5|0},${fG*.5|0},${fB*.5|0},${(.4 + v * .5).toFixed(2)})`);
+    grad.addColorStop(1, `rgba(${Math.min(255,fR*.8|0)},${Math.min(255,fG*.8|0)},${Math.min(255,fB*.8|0)},${(.6 + v * .4).toFixed(2)})`);
+    FX.fillStyle = grad;
+
+    // Rounded-top bar
+    const r = Math.min(bw * .35, 3);
+    FX.beginPath();
+    FX.moveTo(x, ch - 3);
+    FX.lineTo(x, y + r);
+    FX.quadraticCurveTo(x, y, x + r, y);
+    FX.lineTo(x + bw - r, y);
+    FX.quadraticCurveTo(x + bw, y, x + bw, y + r);
+    FX.lineTo(x + bw, ch - 3);
+    FX.closePath();
+    FX.fill();
+
+    // Glow cap
+    if (v > 0.05) {
+      FX.fillStyle = `rgba(${Math.min(255,fR*1.1|0)},${Math.min(255,fG*1.1|0)},${Math.min(255,fB*1.1|0)},${(v * .6).toFixed(2)})`;
+      FX.fillRect(x, y, bw, Math.min(2, bh * .15));
+    }
+  }
+
+  // Subtle horizontal grid lines
+  FX.strokeStyle = `rgba(${_a(1)},.08)`;
+  FX.lineWidth = 0.5;
+  for (let i = 1; i < 4; i++) {
+    const y = (ch / 4) * i;
+    FX.beginPath(); FX.moveTo(0, y); FX.lineTo(cw, y); FX.stroke();
+  }
+}
+
+/* ─── Audio Level Line Graph with AGC (bottom-right) ─── */
+function drawLevel() {
+  const cw = LC.width, ch = LC.height;
+  if (cw < 2 || ch < 2) return;
+  LX.clearRect(0, 0, cw, ch);
+
+  // Background
+  LX.fillStyle = `rgba(${_a(.1)},.4)`;
+  LX.fillRect(0, 0, cw, ch);
+
+  // Grid lines
+  LX.strokeStyle = `rgba(${_a(1)},.08)`;
+  LX.lineWidth = 0.5;
+  for (let i = 1; i < 5; i++) {
+    const y = (ch / 5) * i;
+    LX.beginPath(); LX.moveTo(0, y); LX.lineTo(cw, y); LX.stroke();
+  }
+
+  // Draw anti-peak (5%) and peak (100%) reference lines
+  const peakY    = 3;                           // 100% = top
+  const floorY   = ch - ch * 0.05;             // 5%   = near bottom
+  const rangeY   = floorY - peakY;              // drawable range
+
+  // Anti-peak reference line (5%)
+  LX.strokeStyle = `rgba(${_e(1.06,1.33)},.15)`;;
+  LX.lineWidth = 0.5;
+  LX.setLineDash([4, 4]);
+  LX.beginPath(); LX.moveTo(0, floorY); LX.lineTo(cw, floorY); LX.stroke();
+  LX.setLineDash([]);
+
+  // Peak reference line (100%)
+  LX.strokeStyle = `rgba(${_e(.59,1)},.15)`;;
+  LX.lineWidth = 0.5;
+  LX.setLineDash([4, 4]);
+  LX.beginPath(); LX.moveTo(0, peakY); LX.lineTo(cw, peakY); LX.stroke();
+  LX.setLineDash([]);
+
+  // Labels
+  LX.font = '8px "Segoe UI", sans-serif';
+  LX.fillStyle = `rgba(${_e(.59,1)},.4)`;
+  LX.fillText('PEAK', 3, peakY + 10);
+  LX.fillStyle = `rgba(${_e(1.06,1.33)},.4)`;
+  LX.fillText('FLOOR', 3, floorY - 4);
+
+  if (levelSampleCount < 2) return;
+
+  const count = Math.min(levelSampleCount, LEVEL_BUF_LEN);
+  const stepX = cw / (count - 1);
+
+  // Build points array (read from circular buffer, oldest first)
+  const points = [];
+  const startIdx = (levelWriteIdx - count + LEVEL_BUF_LEN) % LEVEL_BUF_LEN;
+  for (let i = 0; i < count; i++) {
+    const idx = (startIdx + i) % LEVEL_BUF_LEN;
+    const val = levelBuffer[idx];
+    // Map: 0 (anti-peak) → floorY, 1 (peak) → peakY
+    const y = floorY - val * rangeY;
+    points.push({ x: i * stepX, y });
+  }
+
+  // Filled area under the line
+  const areaGrad = LX.createLinearGradient(0, peakY, 0, floorY);
+  areaGrad.addColorStop(0, `rgba(${_a(1.1)},.18)`);
+  areaGrad.addColorStop(0.5, `rgba(${_a(.9)},.08)`);
+  areaGrad.addColorStop(1, `rgba(${_a(.6)},.02)`);
+  LX.fillStyle = areaGrad;
+  LX.beginPath();
+  LX.moveTo(points[0].x, floorY);
+  for (let i = 0; i < points.length; i++) {
+    if (i === 0) {
+      LX.lineTo(points[i].x, points[i].y);
+    } else {
+      // Smooth quadratic curves between points
+      const prev = points[i - 1];
+      const cx = (prev.x + points[i].x) / 2;
+      LX.quadraticCurveTo(prev.x, prev.y, cx, (prev.y + points[i].y) / 2);
+      if (i === points.length - 1) {
+        LX.lineTo(points[i].x, points[i].y);
+      }
+    }
+  }
+  LX.lineTo(points[points.length - 1].x, floorY);
+  LX.closePath();
+  LX.fill();
+
+  // Main line
+  const lineGrad = LX.createLinearGradient(0, 0, cw, 0);
+  lineGrad.addColorStop(0, `rgba(${_a(1)},.4)`);
+  lineGrad.addColorStop(0.5, `rgba(${_a(1.2)},.8)`);
+  lineGrad.addColorStop(1, `rgba(${_e(.76,1)},.9)`);
+  LX.strokeStyle = lineGrad;
+  LX.lineWidth = 1.8;
+  LX.lineJoin = 'round';
+  LX.lineCap = 'round';
+  LX.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    if (i === 0) {
+      LX.moveTo(points[i].x, points[i].y);
+    } else {
+      const prev = points[i - 1];
+      const cx = (prev.x + points[i].x) / 2;
+      LX.quadraticCurveTo(prev.x, prev.y, cx, (prev.y + points[i].y) / 2);
+      if (i === points.length - 1) {
+        LX.lineTo(points[i].x, points[i].y);
+      }
+    }
+  }
+  LX.stroke();
+
+  // Glow line (thicker, more transparent)
+  LX.strokeStyle = `rgba(${_a(1.1)},.2)`;
+  LX.lineWidth = 4;
+  LX.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    if (i === 0) {
+      LX.moveTo(points[i].x, points[i].y);
+    } else {
+      const prev = points[i - 1];
+      const cx = (prev.x + points[i].x) / 2;
+      LX.quadraticCurveTo(prev.x, prev.y, cx, (prev.y + points[i].y) / 2);
+      if (i === points.length - 1) {
+        LX.lineTo(points[i].x, points[i].y);
+      }
+    }
+  }
+  LX.stroke();
+
+  // Current value indicator (dot at the end)
+  if (points.length > 0) {
+    const last = points[points.length - 1];
+    LX.fillStyle = `rgba(${_e(.94,1.33)},.9)`;
+    LX.beginPath(); LX.arc(last.x, last.y, 3, 0, Math.PI * 2); LX.fill();
+    LX.fillStyle = `rgba(${_e(.94,1.33)},.3)`;
+    LX.beginPath(); LX.arc(last.x, last.y, 6, 0, Math.PI * 2); LX.fill();
+  }
+
+  // AGC info overlay
+  LX.font = '8px "Segoe UI", sans-serif';
+  LX.fillStyle = `rgba(${_e(.88,2)},.5)`;
+  LX.textAlign = 'right';
+  LX.fillText(`AGC Peak: ${(agcPeak * 100).toFixed(1)}%`, cw - 4, 12);
+  LX.fillText(`AGC Floor: ${(agcFloor * 100).toFixed(1)}%`, cw - 4, 22);
+  LX.textAlign = 'left';
+}
+
+/* ═══════════════ MAIN LOOP ═══════════════ */
+function loop(now) {
+  const dt = Math.max(1, now - lastFrameTime);
+  lastFrameTime = now;
+  fps += ((1000 / dt) - fps) * .06;
+  readThemeVars();
+
+  if (!Sentinel.paused) {
+    frame++;
+    audio += (audioTarget - audio) * .11;
+    audioTarget *= .91;
+
+    // Smooth frequency bins toward targets + decay
+    for (let i = 0; i < FREQ_BINS; i++) {
+      peakHistory[i] += (freqTargets[i] - peakHistory[i]) * .25;
+      freqTargets[i] *= .92;
+    }
+  }
+
+  drawBG();
+  drawCore();
+  drawTrailsAndRipples();
+
+  // Subtle brightness lift
+  X.globalCompositeOperation = 'screen';
+  X.fillStyle = `rgba(${_a(.8)},${(.02 + audio * .02).toFixed(3)})`;
+  X.fillRect(0, 0, W, H);
+  X.globalCompositeOperation = 'source-over';
+
+  // CRT scan lines (subtle)
+  X.fillStyle = 'rgba(0,0,0,.03)';
+  for (let y = 0; y < H; y += 3) {
+    X.fillRect(0, y, W, 1);
+  }
+
+  // Vignette (stronger, more cinematic)
+  const vig = X.createRadialGradient(W * .5, H * .46, Math.min(W, H) * .15, W * .5, H * .46, Math.max(W, H) * .85);
+  vig.addColorStop(0, 'rgba(0,0,0,0)');
+  vig.addColorStop(.6, 'rgba(0,0,0,.15)');
+  vig.addColorStop(1, 'rgba(0,0,0,.65)');
+  X.fillStyle = vig;
+  X.fillRect(0, 0, W, H);
+
+  // HUD updates
+  tickCaps();
+  updateInterStats();
+  drawFrequency();
+  drawLevel();
+
+  fpsHint.textContent = 'FPS: ' + fps.toFixed(0);
+  // Clock: use time subscription data if available, else local
+  if (!window._sentinelTime) clockEl.textContent = new Date().toLocaleTimeString();
+
+  requestAnimationFrame(loop);
+}
+
+/* ─── Time subscription: display server-provided time ─── */
+Sentinel.subscribe('time', t => {
+  const parts = [];
+  if (t.hour != null && t.minute != null) {
+    const h = String(t.hour).padStart(2, '0');
+    const m = String(t.minute).padStart(2, '0');
+    const s = t.second != null ? ':' + String(t.second).padStart(2, '0') : '';
+    parts.push(h + ':' + m + s);
+  }
+  if (t.date_formatted) {
+    parts.push(t.date_formatted);
+  } else {
+    // Build date string from components
+    const dateStr = [t.year, t.month != null ? String(t.month).padStart(2, '0') : null, t.day != null ? String(t.day).padStart(2, '0') : null].filter(Boolean).join('-');
+    if (dateStr) parts.push(dateStr);
+  }
+  if (parts.length > 0) {
+    window._sentinelTime = true;
+    clockEl.textContent = parts.join('  ·  ');
+  }
+});
+
+/* ═══════════════ INIT ═══════════════ */
+addEventListener('resize', resize, { passive: true });
+
+// Listen for CSS variable updates from the editor preview iframe
+addEventListener('message', function(event) {
+  var data = event && event.data;
+  if (!data || typeof data !== 'object') return;
+  if (data.type === '__sentinel_set_css_var' && data.variable && data.value != null) {
+    document.documentElement.style.setProperty(data.variable, data.value);
+  }
+});
+
+// ── Preview mode: hide HUD when running as editor preview (no native data source) ──
+(function() {
+  var hasNativeChannel = !!(window.chrome && window.chrome.webview && window.chrome.webview.addEventListener);
+  var isInsideIframe = false;
+  try { isInsideIframe = (window !== window.top); } catch(e) { isInsideIframe = true; }
+
+  if (!hasNativeChannel && isInsideIframe) {
+    // We're in the editor preview iframe — hide HUD so the canvas animation is the focus
+    var hud = document.querySelector('.hud');
+    if (hud) hud.style.display = 'none';
+  }
+})();
+
+resize();
+initCapsUI();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
