@@ -60,7 +60,6 @@ fn main() -> windows::core::Result<()> {
 	let config_path = addon_config_path();
 	let mut config = AddonConfig::load(&config_path).unwrap_or_else(|| AddonConfig {
 		debug: false,
-		log_level: "warn".to_string(),
 		settings: AddonSettings::default(),
 		wallpapers: Vec::new(),
 	});

@@ -7,7 +7,6 @@ use super::yaml::load_yaml;
 #[derive(Debug, Clone)]
 pub struct AddonConfig {
     pub debug: bool,
-    pub log_level: String,
     pub settings: AddonSettings,
     pub wallpapers: Vec<WallpaperConfig>,
 }
@@ -76,8 +75,7 @@ pub struct DiagnosticsSettings {
 pub struct DevelopmentSettings {
     pub update_check: bool,
     pub debug: bool,
-    pub log_level: String,
-}
+    }
 
 #[derive(Debug, Clone)]
 pub struct WallpaperConfig {
@@ -181,7 +179,6 @@ impl Default for DevelopmentSettings {
         Self {
             update_check: true,
             debug: false,
-            log_level: "warn".to_string(),
         }
     }
 }
@@ -227,14 +224,12 @@ impl AddonConfig {
 
         let settings = parse_settings(map);
         let debug = settings.development.debug;
-        let log_level = settings.development.log_level.clone();
 
         let mut wallpapers = parse_wallpaper_sections(map, &settings);
         wallpapers.sort_by(|a, b| section_order_key(&a.section).cmp(&section_order_key(&b.section)));
 
         Some(Self {
             debug,
-            log_level,
             settings,
             wallpapers,
         })
@@ -342,9 +337,6 @@ fn parse_settings(root: &Mapping) -> AddonSettings {
 
     settings.development.update_check = bool_at(root, "update_check").unwrap_or(settings.development.update_check);
     settings.development.debug = bool_at(root, "debug").unwrap_or(settings.development.debug);
-    settings.development.log_level = str_at(root, "log_level")
-        .unwrap_or(&settings.development.log_level)
-        .to_lowercase();
 
     let settings_map = mapping_at(root, "settings");
     let performance_map = settings_map.and_then(|v| mapping_at(v, "performance"));
@@ -452,7 +444,6 @@ fn parse_settings(root: &Mapping) -> AddonSettings {
         settings.development.update_check =
             bool_any(dev, &["update_check", "check_for_updates"]).unwrap_or(settings.development.update_check);
         settings.development.debug = bool_any(dev, &["debug", "debug_mode"]).unwrap_or(settings.development.debug);
-        settings.development.log_level = str_any(dev, &["log_level", "logging"]).unwrap_or("warn").to_lowercase();
     }
 
     settings
@@ -468,10 +459,6 @@ fn bool_any(map: &Mapping, keys: &[&str]) -> Option<bool> {
 
 fn str_at<'a>(map: &'a Mapping, key: &str) -> Option<&'a str> {
     map.get(Value::String(key.to_string()))?.as_str()
-}
-
-fn str_any<'a>(map: &'a Mapping, keys: &[&str]) -> Option<&'a str> {
-    keys.iter().find_map(|k| str_at(map, k))
 }
 
 fn mapping_at<'a>(map: &'a Mapping, key: &str) -> Option<&'a Mapping> {
