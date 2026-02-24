@@ -33,3 +33,6 @@ serde_yaml = "0.9.34"
 chrono = "0.4.43"
 webview2-com = "0.38.2"
 image = "0.25.9"
+
+[build-dependencies]
+winresource = "0.1"
