@@ -53,6 +53,7 @@ fn enable_per_monitor_dpi_awareness() {
 }
 
 fn main() -> windows::core::Result<()> {
+	logging::init(true, "info");
 	bootstrap::bootstrap_addon();
 	enable_per_monitor_dpi_awareness();
 
@@ -64,7 +65,7 @@ fn main() -> windows::core::Result<()> {
 		wallpapers: Vec::new(),
 	});
 
-	logging::init(config.debug, &config.log_level);
+	logging::set_debug(config.debug);
 	std::panic::set_hook(Box::new(|panic_info| {
 		error!("[{}] Panic: {}", DEBUG_NAME, panic_info);
 	}));

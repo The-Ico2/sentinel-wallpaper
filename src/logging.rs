@@ -57,6 +57,10 @@ pub fn should_log(level: &str) -> bool {
     true
 }
 
+pub fn set_debug(debug: bool) {
+    ENABLED.store(debug, Ordering::Relaxed);
+}
+
 /* =========================
    INTERNAL
    ========================= */
