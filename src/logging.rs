@@ -12,8 +12,6 @@ use std::{
 
 use chrono;
 
-use crate::utility::sentinel_root_dir;
-
 /* =========================
    GLOBAL STATE
    ========================= */
@@ -118,8 +116,8 @@ macro_rules! error {
 
 fn log_path() -> &'static PathBuf {
     LOG_PATH.get_or_init(|| {
-        sentinel_root_dir()
-            .map(|p| p.join("sentinel.wallpaper.log"))
-            .unwrap_or_else(|| PathBuf::from("sentinel.wallpaper.log"))
+        let logs_dir = crate::paths::sentinel_root_dir().join("logs");
+        let _ = std::fs::create_dir_all(&logs_dir);
+        logs_dir.join("sentinel.wallpaper.log")
     })
 }

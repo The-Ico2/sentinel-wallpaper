@@ -5,6 +5,7 @@ mod ipc_connector;
 mod logging;
 mod utility;
 mod wallpaper_engine;
+mod paths;
 
 use std::{
 	fs,
