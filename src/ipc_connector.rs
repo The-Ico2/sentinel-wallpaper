@@ -177,11 +177,49 @@ pub fn request(ns: &str, cmd: &str, args: Option<serde_json::Value>) -> Option<S
     }
 }
 
+/// Quick request — single attempt, no retries.
+/// Designed for the real-time tick loop where fast failure is preferred over
+/// blocking for seconds on retries (the next tick will try again anyway).
+pub fn request_quick(ns: &str, cmd: &str, args: Option<serde_json::Value>) -> Option<String> {
+    let req = serde_json::json!({
+        "ns": ns,
+        "cmd": cmd,
+        "args": args
+    });
+
+    if let Some(resp) = send_ipc_request_once(&req) {
+        if resp.ok {
+            if let Some(data) = resp.data {
+                return Some(data.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 fn send_ipc_request(req: &Value) -> Option<IpcResponse> {
+    // Retry with increasing backoff: 100, 200, 400, 800, 1600 ms
+    let backoff = [100u64, 200, 400, 800, 1600];
+
     if let Some(resp) = send_ipc_request_once(req) {
         return Some(resp);
     }
 
-    thread::sleep(Duration::from_millis(40));
-    send_ipc_request_once(req)
+    for (i, delay) in backoff.iter().enumerate() {
+        info!(
+            "[{}][IPC] Retry {}/{} after {}ms",
+            DEBUG_NAME,
+            i + 1,
+            backoff.len(),
+            delay
+        );
+        thread::sleep(Duration::from_millis(*delay));
+        if let Some(resp) = send_ipc_request_once(req) {
+            return Some(resp);
+        }
+    }
+
+    error!("[{}][IPC] All retries exhausted — request failed", DEBUG_NAME);
+    None
 }

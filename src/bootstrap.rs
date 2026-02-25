@@ -52,11 +52,39 @@ fn ensure_backend_running() {
     match std::process::Command::new(&backend_exe).spawn() {
         Ok(_) => {
             info!("[{}] Started sentinelc.exe from {}", ADDON_NAME, backend_exe.display());
-            // Give the backend a moment to initialize the IPC pipe
-            std::thread::sleep(std::time::Duration::from_millis(1500));
+            // Poll until the IPC pipe is available (up to ~10 seconds)
+            wait_for_ipc_pipe();
         }
         Err(e) => warn!("[{}] Failed to start sentinelc.exe: {e}", ADDON_NAME),
     }
+}
+
+/// Poll until the Sentinel IPC named pipe exists, or give up after ~10 seconds.
+fn wait_for_ipc_pipe() {
+    use crate::utility::to_wstring;
+    use windows::core::PCWSTR;
+    use windows::Win32::System::Pipes::WaitNamedPipeW;
+
+    let pipe_wide = to_wstring(r"\\.\pipe\sentinel");
+    let pipe_name = PCWSTR(pipe_wide.as_ptr());
+    let max_attempts = 40; // 40 * 250ms = 10 seconds
+
+    for attempt in 1..=max_attempts {
+        let available = unsafe { WaitNamedPipeW(pipe_name, 250).as_bool() };
+        if available {
+            info!(
+                "[{}] IPC pipe available after {} attempt(s)",
+                ADDON_NAME, attempt
+            );
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    warn!(
+        "[{}] IPC pipe not available after {}ms — continuing anyway",
+        ADDON_NAME,
+        max_attempts * 250
+    );
 }
 
 /// Bootstrap the addon: create directory structure, scaffold default files,
@@ -89,6 +117,7 @@ pub fn bootstrap_addon() {
     scaffold_config_yaml(&addon_dir);
     scaffold_schema_yaml(&addon_dir);
     scaffold_options_html(&options_dir);
+    scaffold_options_assets(&options_dir);
     scaffold_default_asset();
     info!("[{}] Scaffolding complete", ADDON_NAME);
 
@@ -434,11 +463,32 @@ r#"<!DOCTYPE html>
     }
 }
 
+// ── Bundled options CSS / JS ──────────────────────────────────────────
+
+const OPTIONS_CSS: &str = include_str!("../options/options.css");
+const OPTIONS_JS: &str = include_str!("../options/options.js");
+
+fn scaffold_options_assets(options_dir: &PathBuf) {
+    let files: &[(&str, &str)] = &[
+        ("options.css", OPTIONS_CSS),
+        ("options.js", OPTIONS_JS),
+    ];
+    for (name, content) in files {
+        let path = options_dir.join(name);
+        if path.exists() { continue; }
+        match fs::write(&path, content) {
+            Ok(_) => info!("[{}] Created options/{}", ADDON_NAME, name),
+            Err(e) => warn!("[{}] Failed to create options/{}: {e}", ADDON_NAME, name),
+        }
+    }
+}
+
 // ── Bundled default wallpaper asset ──────────────────────────────────
 
 const DEFAULT_ASSET_MANIFEST: &str = include_str!("../assets/sentinel.default/manifest.json");
 const DEFAULT_ASSET_INDEX: &str = include_str!("../assets/sentinel.default/index.html");
 const DEFAULT_ASSET_PREVIEW: &[u8] = include_bytes!("../assets/sentinel.default/preview/1.png");
+const SENTINEL_JS: &str = include_str!("../assets/sentinel.js");
 
 fn scaffold_default_asset() {
     let Some(assets_dir) = sentinel_assets_dir() else {
@@ -449,6 +499,15 @@ fn scaffold_default_asset() {
     let asset_dir = assets_dir.join("wallpaper").join("sentinel.default");
     let preview_dir = asset_dir.join("preview");
     let _ = fs::create_dir_all(&preview_dir);
+
+    // Scaffold sentinel.js into Assets/wallpaper/ (shared SDK for all wallpapers)
+    let sentinel_js_path = assets_dir.join("wallpaper").join("sentinel.js");
+    if !sentinel_js_path.exists() {
+        match fs::write(&sentinel_js_path, SENTINEL_JS) {
+            Ok(_) => info!("[{}] Created Assets/wallpaper/sentinel.js", ADDON_NAME),
+            Err(e) => warn!("[{}] Failed to create Assets/wallpaper/sentinel.js: {e}", ADDON_NAME),
+        }
+    }
 
     let manifest_path = asset_dir.join("manifest.json");
     if !manifest_path.exists() {

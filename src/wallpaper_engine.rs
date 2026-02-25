@@ -48,7 +48,7 @@ use windows::{
 use crate::{
     data_loaders::config::{AddonConfig, PauseMode, WallpaperConfig},
     error,
-    ipc_connector::request,
+    ipc_connector::{request, request_quick},
     utility::{sentinel_assets_dir, to_wstring},
     warn,
 };
@@ -136,6 +136,9 @@ pub struct WallpaperRuntime {
     cached_appdata: Value,
     last_editable_tick: Instant,
     editable_cache: HashMap<PathBuf, String>,
+    /// Whether the last registry IPC call succeeded.
+    /// When false, ALL data delivery to webviews is suppressed.
+    registry_connected: bool,
 }
 
 impl WallpaperRuntime {
@@ -175,6 +178,7 @@ impl WallpaperRuntime {
             cached_appdata: Value::Null,
             last_editable_tick: Instant::now(),
             editable_cache: HashMap::new(),
+            registry_connected: false,
         }
     }
 
@@ -197,6 +201,7 @@ impl WallpaperRuntime {
         self.cached_appdata = Value::Null;
         self.last_editable_tick = Instant::now();
         self.editable_cache.clear();
+        self.registry_connected = false;
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -401,6 +406,51 @@ impl WallpaperRuntime {
             Duration::from_millis(100)
         };
 
+        // ── Registry snapshot (determines connectivity) ─────────────
+        if self.last_registry_tick.elapsed() >= registry_interval {
+            self.last_registry_tick = Instant::now();
+
+            if let Some((sysdata, appdata, payload)) = build_registry_snapshot_and_payload() {
+                if !self.registry_connected {
+                    warn!("[WALLPAPER][REGISTRY] Connection established");
+                }
+                self.registry_connected = true;
+                self.cached_sysdata = sysdata;
+                self.cached_appdata = appdata;
+                let has_active_hosts = self.hosted.iter().any(|h| !h.paused);
+                let should_send = self
+                    .last_registry_payload
+                    .as_ref()
+                    .map(|prev| prev != &payload)
+                    .unwrap_or(true);
+
+                if has_active_hosts && should_send {
+                    self.last_registry_payload = Some(payload.clone());
+                    for hosted in &self.hosted {
+                        if hosted.paused {
+                            continue;
+                        }
+                        let _ = post_webview_json(&hosted.webview, &payload);
+                    }
+                }
+            } else {
+                if self.registry_connected {
+                    warn!("[WALLPAPER][REGISTRY] Connection lost — suppressing all data delivery");
+                }
+                self.registry_connected = false;
+            }
+        }
+
+        // ── All interaction data gated behind registry connection ───
+        if !self.registry_connected {
+            // Still evaluate pausing even without registry,
+            // but skip mouse/keyboard/audio delivery.
+            if self.last_pause_tick.elapsed() >= self.pause_check_interval {
+                self.last_pause_tick = Instant::now();
+            }
+            return false;
+        }
+
         let mut point = POINT::default();
         if !all_paused {
             unsafe {
@@ -518,31 +568,6 @@ impl WallpaperRuntime {
                     Err(e) => {
                         warn!("[WALLPAPER][AUDIO] Peak read failed, resetting meter: {}", e);
                         self.audio_meter = None;
-                    }
-                }
-            }
-        }
-
-        if self.last_registry_tick.elapsed() >= registry_interval {
-            self.last_registry_tick = Instant::now();
-
-            if let Some((sysdata, appdata, payload)) = build_registry_snapshot_and_payload() {
-                self.cached_sysdata = sysdata;
-                self.cached_appdata = appdata;
-                let has_active_hosts = self.hosted.iter().any(|h| !h.paused);
-                let should_send = self
-                    .last_registry_payload
-                    .as_ref()
-                    .map(|prev| prev != &payload)
-                    .unwrap_or(true);
-
-                if has_active_hosts && should_send {
-                    self.last_registry_payload = Some(payload.clone());
-                    for hosted in &self.hosted {
-                        if hosted.paused {
-                            continue;
-                        }
-                        let _ = post_webview_json(&hosted.webview, &payload);
                     }
                 }
             }
@@ -978,24 +1003,22 @@ fn resolve_monitor_id_for_rect(sysdata: &Value, rect: RECT) -> Option<String> {
 }
 
 fn build_registry_snapshot_and_payload() -> Option<(Value, Value, String)> {
-    let sysdata_raw = request("registry", "list_sysdata", None)?;
-    let appdata_raw = request("registry", "list_appdata", None)?;
+    // Single IPC round-trip using the combined `snapshot` command.
+    // Uses request_quick (no retries) so the tick loop never blocks for seconds.
+    let snapshot_raw = request_quick("registry", "snapshot", None)?;
+    let snapshot: Value = serde_json::from_str(&snapshot_raw).ok()?;
 
-    let sysdata = serde_json::from_str::<Value>(&sysdata_raw).unwrap_or(Value::Null);
-    let appdata = serde_json::from_str::<Value>(&appdata_raw).unwrap_or(Value::Null);
+    let sysdata = snapshot.get("sysdata").cloned().unwrap_or(Value::Null);
+    let appdata = snapshot.get("appdata").cloned().unwrap_or(Value::Null);
 
-    let payload =
-        serde_json::json!({
-            "type": "native_registry",
-            "sysdata": sysdata,
-            "appdata": appdata,
-        })
-        .to_string();
+    let payload = serde_json::json!({
+        "type": "native_registry",
+        "sysdata": sysdata,
+        "appdata": appdata,
+    })
+    .to_string();
 
-    let payload_value = serde_json::from_str::<Value>(&payload).ok()?;
-    let sys = payload_value.get("sysdata").cloned().unwrap_or(Value::Null);
-    let app = payload_value.get("appdata").cloned().unwrap_or(Value::Null);
-    Some((sys, app, payload))
+    Some((sysdata, appdata, payload))
 }
 
 struct SystemAudioMeter {
