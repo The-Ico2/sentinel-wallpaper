@@ -1,5 +1,5 @@
 /**
- * Sentinel SDK v1.0
+ * Sentinel SDK v2.0
  * ------------------
  * Drop this file into any Sentinel wallpaper / widget HTML project.
  * It bridges the WebView2 native message channel and provides a
@@ -17,13 +17,34 @@
  *   native_pause     – wallpaper paused/resumed
  *   native_css_vars  – live CSS variable updates from manifest editable changes
  *
+ * Registry format (v2):
+ *   sysdata: {
+ *     displays: [{ id, category, subtype, metadata: { primary, x, y, width, height, ... } }],
+ *     cpu: { ... }, gpu: { ... }, ram: { ... }, storage: { ... },
+ *     network: { ... }, audio: { ... }, time: { ... }, keyboard: { ... },
+ *     mouse: { ... }, power: { ... }, bluetooth: { ... }, wifi: { ... },
+ *     system: { ... }, processes: { ... }, idle: { ... }
+ *   }
+ *   appdata: {
+ *     "MONITOR_ID": {
+ *       windows: [{ focused, app_name, app_icon, exe_path, window_title,
+ *                   pid, window_state, size: { width, height },
+ *                   position: { x, y } }]
+ *     }
+ *   }
+ *
  * Usage:
  *   <script src="sentinel.js"></script>
  *   <script>
- *     // Subscribe to specific sysdata categories (only called when that data changes)
+ *     // Subscribe to sysdata categories (only called when data changes)
  *     Sentinel.subscribe('cpu', data => { ... });
  *     Sentinel.subscribe('gpu', data => { ... });
  *     Sentinel.subscribe('ram', data => { ... });
+ *     Sentinel.subscribe('displays', displays => { ... });
+ *
+ *     // Subscribe to per-monitor appdata
+ *     Sentinel.subscribe('appdata', allMonitors => { ... });
+ *     Sentinel.subscribe('appdata:MONITOR_0', monitorData => { ... });
  *
  *     // Subscribe to interaction events
  *     Sentinel.on('move', e => { ... });
@@ -38,6 +59,11 @@
  *     const cpu = Sentinel.get('cpu');
  *     const allSys = Sentinel.sysdata;
  *     const allApp = Sentinel.appdata;
+ *
+ *     // Display helpers
+ *     const monitors = Sentinel.displays;              // flat metadata array
+ *     const primary  = Sentinel.getDisplay('0');        // single display metadata
+ *     const windows  = Sentinel.getWindows('MONITOR_0'); // windows on a monitor
  *   </script>
  */
 ;(function (root) {
@@ -48,7 +74,7 @@
    * ═══════════════════════════════════════════════ */
   const _subscribers = {};      // category → [callbacks]
   const _eventListeners = {};   // event name → [callbacks]
-  const _prevHash = {};         // category → JSON hash for change detection
+  const _prevHash = {};         // category → hash for change detection
   let _sysdata = null;
   let _appdata = null;
   let _paused = false;
@@ -78,7 +104,7 @@
         }
         if (d.appdata) {
           _appdata = d.appdata;
-          dispatch('appdata', d.appdata);
+          dispatchAppdata(d.appdata);
         }
         emit('registry', { sysdata: _sysdata, appdata: _appdata });
         break;
@@ -141,26 +167,23 @@
 
   /* ─── Dispatch per-category sysdata subscriptions ─── */
   function dispatchSysdata(sys) {
-    // All known sysdata keys
-    const keys = [
-      'cpu', 'gpu', 'ram', 'storage', 'network', 'audio', 'time',
-      'keyboard', 'mouse', 'power', 'bluetooth', 'wifi', 'system',
-      'processes', 'idle', 'displays'
-    ];
-
-    for (const key of keys) {
+    // Dynamically iterate all keys present in the sysdata object
+    // so that newly-added categories are picked up automatically.
+    for (var key in sys) {
+      if (!sys.hasOwnProperty(key)) continue;
       if (!(key in _subscribers) || _subscribers[key].length === 0) continue;
-      const val = sys[key];
+
+      var val = sys[key];
       if (val === undefined || val === null) continue;
 
       // Change detection: only fire callback when data actually changed
-      const json = JSON.stringify(val);
-      const hash = djb2(json);
+      var json = JSON.stringify(val);
+      var hash = djb2(json);
       if (_prevHash[key] === hash) continue;
       _prevHash[key] = hash;
 
-      const cbs = _subscribers[key];
-      for (let i = 0; i < cbs.length; i++) {
+      var cbs = _subscribers[key];
+      for (var i = 0; i < cbs.length; i++) {
         try { cbs[i](val); } catch (e) { console.error('[Sentinel] subscriber error (' + key + '):', e); }
       }
     }
@@ -169,24 +192,50 @@
     dispatch('sysdata', sys);
   }
 
-  /* ─── Generic dispatch (for appdata, sysdata wildcard) ─── */
+  /* ─── Dispatch per-monitor appdata subscriptions ─── */
+  function dispatchAppdata(app) {
+    // Fire the full 'appdata' subscription
+    dispatch('appdata', app);
+
+    // Fire per-monitor subscriptions: subscribe('appdata:MONITOR_0', cb)
+    if (app && typeof app === 'object') {
+      for (var monitorId in app) {
+        if (!app.hasOwnProperty(monitorId)) continue;
+        var subKey = 'appdata:' + monitorId;
+        if (!(subKey in _subscribers) || _subscribers[subKey].length === 0) continue;
+
+        var monitorData = app[monitorId];
+        var json = JSON.stringify(monitorData);
+        var hash = djb2(json);
+        if (_prevHash[subKey] === hash) continue;
+        _prevHash[subKey] = hash;
+
+        var cbs = _subscribers[subKey];
+        for (var i = 0; i < cbs.length; i++) {
+          try { cbs[i](monitorData); } catch (e) { console.error('[Sentinel] subscriber error (' + subKey + '):', e); }
+        }
+      }
+    }
+  }
+
+  /* ─── Generic dispatch (for appdata wildcard, sysdata wildcard) ─── */
   function dispatch(name, data) {
-    const cbs = _subscribers[name];
+    var cbs = _subscribers[name];
     if (!cbs || cbs.length === 0) return;
-    const json = JSON.stringify(data);
-    const hash = djb2(json);
+    var json = JSON.stringify(data);
+    var hash = djb2(json);
     if (_prevHash[name] === hash) return;
     _prevHash[name] = hash;
-    for (let i = 0; i < cbs.length; i++) {
+    for (var i = 0; i < cbs.length; i++) {
       try { cbs[i](data); } catch (e) { console.error('[Sentinel] subscriber error (' + name + '):', e); }
     }
   }
 
   /* ─── Event emitter ─── */
   function emit(name, data) {
-    const cbs = _eventListeners[name];
+    var cbs = _eventListeners[name];
     if (!cbs || cbs.length === 0) return;
-    for (let i = 0; i < cbs.length; i++) {
+    for (var i = 0; i < cbs.length; i++) {
       try { cbs[i](data); } catch (e) { console.error('[Sentinel] event error (' + name + '):', e); }
     }
   }
@@ -194,10 +243,10 @@
   /* ═══════════════════════════════════════════════
    *  Public API
    * ═══════════════════════════════════════════════ */
-  const Sentinel = {
+  var Sentinel = {
 
     /** Current SDK version */
-    version: '1.0.0',
+    version: '2.0.0',
 
     /** Whether the wallpaper is currently paused */
     get paused() { return _paused; },
@@ -207,6 +256,28 @@
 
     /** Latest full appdata snapshot (or null) */
     get appdata() { return _appdata; },
+
+    /**
+     * Flat array of display metadata objects (unwrapped from registry entries).
+     * Each element is the raw metadata: { id, primary, x, y, width, height, scale, ... }
+     * Returns empty array if no display data is available.
+     * @returns {Array<object>}
+     */
+    get displays() {
+      if (!_sysdata || !Array.isArray(_sysdata.displays)) return [];
+      return _sysdata.displays.map(function (entry) {
+        return entry.metadata || entry;
+      });
+    },
+
+    /**
+     * Array of monitor IDs present in appdata.
+     * @returns {Array<string>}
+     */
+    get monitors() {
+      if (!_appdata || typeof _appdata !== 'object') return [];
+      return Object.keys(_appdata);
+    },
 
     /**
      * Get a specific sysdata category's current cached data.
@@ -220,6 +291,53 @@
     },
 
     /**
+     * Get a single display's metadata by its ID.
+     * @param {string} id - Display ID (e.g. '0', '1')
+     * @returns {object|null} The display metadata, or null if not found
+     */
+    getDisplay(id) {
+      if (!_sysdata || !Array.isArray(_sysdata.displays)) return null;
+      for (var i = 0; i < _sysdata.displays.length; i++) {
+        var entry = _sysdata.displays[i];
+        var entryId = entry.id || (entry.metadata && entry.metadata.id);
+        if (entryId === id || entryId === String(id)) {
+          return entry.metadata || entry;
+        }
+      }
+      return null;
+    },
+
+    /**
+     * Get the window list for a specific monitor.
+     * @param {string} monitorId - Monitor ID as used in appdata keys
+     * @returns {Array<object>} Array of window objects, or empty array
+     */
+    getWindows(monitorId) {
+      if (!_appdata || typeof _appdata !== 'object') return [];
+      var monitor = _appdata[monitorId];
+      if (!monitor || !Array.isArray(monitor.windows)) return [];
+      return monitor.windows;
+    },
+
+    /**
+     * Get the focused window on a specific monitor (or any monitor if omitted).
+     * @param {string} [monitorId] - Optional monitor ID to restrict search
+     * @returns {object|null} The focused window object, or null
+     */
+    getFocusedWindow(monitorId) {
+      if (!_appdata || typeof _appdata !== 'object') return null;
+      var monitors = monitorId ? [monitorId] : Object.keys(_appdata);
+      for (var m = 0; m < monitors.length; m++) {
+        var mon = _appdata[monitors[m]];
+        if (!mon || !Array.isArray(mon.windows)) continue;
+        for (var w = 0; w < mon.windows.length; w++) {
+          if (mon.windows[w].focused) return mon.windows[w];
+        }
+      }
+      return null;
+    },
+
+    /**
      * Subscribe to a data category. The callback fires only when the data
      * for that category has changed since the last update.
      *
@@ -228,6 +346,7 @@
      *                 keyboard, mouse, power, bluetooth, wifi, system,
      *                 processes, idle, displays
      *   Wildcards:    sysdata (full object), appdata (full object)
+     *   Per-monitor:  appdata:MONITOR_ID (e.g. 'appdata:MONITOR_0')
      *
      * @param {string}   category - Data category name
      * @param {function} callback - function(data)
@@ -242,9 +361,9 @@
 
       // Return unsubscribe function
       return function unsubscribe() {
-        const arr = _subscribers[category];
+        var arr = _subscribers[category];
         if (!arr) return;
-        const idx = arr.indexOf(callback);
+        var idx = arr.indexOf(callback);
         if (idx !== -1) arr.splice(idx, 1);
       };
     },
@@ -253,16 +372,17 @@
      * Listen for interaction / lifecycle events.
      *
      * Events:
-     *   move      – { x, y, nx, ny }
-     *   click     – { x, y, nx, ny }
-     *   keydown   – { key, vk }
-     *   keyup     – { key, vk }
-     *   key       – { key, vk, state: 'down'|'up' }
-     *   audio     – { level: 0..1 }
-     *   pause     – { paused: true }
-     *   resume    – { paused: false }
+     *   move        – { x, y, nx, ny }
+     *   click       – { x, y, nx, ny }
+     *   keydown     – { key, vk }
+     *   keyup       – { key, vk }
+     *   key         – { key, vk, state: 'down'|'up' }
+     *   audio       – { level: 0..1 }
+     *   pause       – { paused: true }
+     *   resume      – { paused: false }
      *   pausechange – { paused: bool }
-     *   registry  – { sysdata, appdata }  (raw, every update)
+     *   registry    – { sysdata, appdata }  (raw, every update)
+     *   cssvarchange – { varName: value, ... }
      *
      * @param {string}   event    - Event name
      * @param {function} callback - function(data)
@@ -276,9 +396,9 @@
       _eventListeners[event].push(callback);
 
       return function off() {
-        const arr = _eventListeners[event];
+        var arr = _eventListeners[event];
         if (!arr) return;
-        const idx = arr.indexOf(callback);
+        var idx = arr.indexOf(callback);
         if (idx !== -1) arr.splice(idx, 1);
       };
     },
@@ -289,9 +409,9 @@
      * @param {function} callback
      */
     off(event, callback) {
-      const arr = _eventListeners[event];
+      var arr = _eventListeners[event];
       if (!arr) return;
-      const idx = arr.indexOf(callback);
+      var idx = arr.indexOf(callback);
       if (idx !== -1) arr.splice(idx, 1);
     },
 
@@ -299,9 +419,9 @@
      * Remove all subscribers and event listeners.
      */
     clear() {
-      for (const k in _subscribers) delete _subscribers[k];
-      for (const k in _eventListeners) delete _eventListeners[k];
-      for (const k in _prevHash) delete _prevHash[k];
+      for (var k in _subscribers) delete _subscribers[k];
+      for (var k in _eventListeners) delete _eventListeners[k];
+      for (var k in _prevHash) delete _prevHash[k];
     },
 
     /* ─── Utility helpers ─── */
@@ -314,9 +434,9 @@
      */
     formatBytes(bytes, decimals) {
       if (bytes == null || isNaN(bytes) || bytes === 0) return '0 B';
-      const d = decimals != null ? decimals : 2;
-      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-      const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      var d = decimals != null ? decimals : 2;
+      var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      var i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
       return (bytes / Math.pow(1024, i)).toFixed(d) + ' ' + units[i];
     },
 
@@ -350,7 +470,7 @@
      */
     formatTemp(temp) {
       if (temp == null || typeof temp !== 'object') return '—';
-      const avg = temp.average_c;
+      var avg = temp.average_c;
       if (avg == null || avg === 0) return '—';
       return avg.toFixed(1) + '°C';
     }

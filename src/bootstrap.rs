@@ -217,6 +217,7 @@ fn scaffold_config_yaml(addon_dir: &PathBuf) {
       focus: "per-monitor"
       maximized: "per-monitor"
       fullscreen: "all-monitors"
+      idle_timeout_ms: 0
       check_interval_ms: 500
     watcher:
       enabled: true
@@ -283,6 +284,12 @@ ui:
               label: "Pause On Fullscreen"
               control: "dropdown"
               options: ["off", "per-monitor", "all-monitors"]
+            - path: "idle_timeout_ms"
+              label: "Pause On Idle Timeout (ms)"
+              control: "number_range"
+              min: 0
+              max: 3600000
+              step: 1000
             - path: "check_interval_ms"
               label: "Pause Check Interval (ms)"
               control: "number_range"

@@ -7,8 +7,12 @@
 <style>
 :root{
   --au:0;
+  --ui-scale: 1;
+  --ui-scale-multiplier: 1;
   --bg-color: #0a0406;
   --text-color: #ffe4d8;
+  --accent: #C83228;
+  --ember: #FFAA3C;
   --accent-r: 200;
   --accent-g: 50;
   --accent-b: 40;
@@ -18,6 +22,19 @@
   --font-family: 'Segoe UI', Inter, system-ui, sans-serif;
   --hud-opacity: 0.3;
   --font-size: 12;
+  --left-col-width: 300;
+  --right-col-width: 300;
+  --hud-padding: 10;
+  --panel-gap: 6;
+  --panel-radius: 10;
+  --panel-padding-y: 7;
+  --panel-padding-x: 10;
+  --top-blur: 8;
+  --panel-blur: 2;
+  --panel-border-opacity: 0.1;
+  --panel-bg-opacity: 0.06;
+  --viz-min-height: 100;
+  --lattice-spacing: 80;
 }
 
 * {
@@ -42,14 +59,19 @@ canvas{
 /* ─── HUD ─── */
 .hud {
   position: fixed;
-  inset: 0;
+  left: 0;
+  top: 0;
+  width: calc(100% / var(--ui-scale));
+  height: calc(100% / var(--ui-scale));
   z-index: 1;
   pointer-events: none;
-  padding: 10px;
+  transform-origin: top left;
+  transform: scale(var(--ui-scale));
+  padding: calc(var(--hud-padding) * 1px);
   display: grid;
-  grid-template-columns: 300px 1fr 300px;
+  grid-template-columns: calc(var(--left-col-width) * 1px) 1fr calc(var(--right-col-width) * 1px);
   grid-template-rows: auto 1fr auto;
-  gap: 6px;
+  gap: calc(var(--panel-gap) * 1px);
 }
 
 /* title bar */
@@ -58,11 +80,11 @@ canvas{
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(20, 8, 8, var(--hud-opacity));
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.12);
-  border-radius: 10px;
+  background: rgba(var(--bg-r), var(--bg-g), var(--bg-b), var(--hud-opacity));
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
+  border-radius: calc(var(--panel-radius) * 1px);
   padding: 6px 16px;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(calc(var(--top-blur) * 1px));
 }
 
 .top .time {
@@ -75,11 +97,11 @@ canvas{
 
 /* panels */
 .pnl {
-  background: transparent;
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
-  border-radius: 10px;
-  padding: 7px 10px;
-  backdrop-filter: blur(2px);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-bg-opacity));
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
+  border-radius: calc(var(--panel-radius) * 1px);
+  padding: calc(var(--panel-padding-y) * 1px) calc(var(--panel-padding-x) * 1px);
+  backdrop-filter: blur(calc(var(--panel-blur) * 1px));
   overflow: visible;
   flex-shrink: 1;
   min-height: 0;
@@ -129,7 +151,7 @@ canvas{
 .left {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: calc(var(--panel-gap) * 1px - 1px);
   overflow-y: auto;
   scrollbar-width: none;
   min-height: 0;
@@ -143,7 +165,7 @@ canvas{
 .right {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: calc(var(--panel-gap) * 1px - 1px);
   overflow-y: auto;
   scrollbar-width: none;
   min-height: 0;
@@ -227,13 +249,13 @@ canvas{
 /* audio visualizer (combined, in right column) */
 .vizPanel {
   background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
-  border-radius: 10px;
-  padding: 7px 10px;
-  backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
+  border-radius: calc(var(--panel-radius) * 1px);
+  padding: calc(var(--panel-padding-y) * 1px) calc(var(--panel-padding-x) * 1px);
+  backdrop-filter: blur(calc(var(--top-blur) * 1px));
   overflow: hidden;
   position: relative;
-  min-height: 100px;
+  min-height: calc(var(--viz-min-height) * 1px);
   flex-shrink: 1;
 }
 
@@ -264,10 +286,10 @@ canvas{
 }
 
 .pill {
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.12);
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
   border-radius: 999px;
   padding: 4px 12px;
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-bg-opacity));
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -322,10 +344,6 @@ canvas{
       <h2>System</h2>
       <div id="systemInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
     </div>
-    <div class="pnl" id="processPanel">
-      <h2>Processes</h2>
-      <div id="processInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
   </div>
 
   <!-- Center (empty, background shows through) -->
@@ -333,19 +351,19 @@ canvas{
 
   <!-- Right: Interaction + Audio + Connectivity -->
   <div class="right">
-    <div class="pnl">
+    <div class="pnl" id="eventPanel">
       <h2>Event Signals</h2>
       <div class="caps" id="caps"></div>
     </div>
-    <div class="pnl">
+    <div class="pnl" id="interPanel">
       <h2>Interaction Stats</h2>
       <div id="interStats"></div>
     </div>
-    <div class="pnl">
+    <div class="pnl" id="keysPanel">
       <h2>Recent Keys</h2>
       <div class="keys" id="keys"></div>
     </div>
-    <div class="pnl">
+    <div class="pnl" id="audioPanel">
       <h2>Audio Device</h2>
       <div id="audioStats"></div>
     </div>
@@ -369,7 +387,7 @@ canvas{
       <h2>Media Session</h2>
       <div id="mediaInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
     </div>
-    <div class="vizPanel">
+    <div class="vizPanel" id="vizPanel">
       <h2>Audio</h2>
       <canvas id="levelCanvas"></canvas>
       <canvas id="freqCanvas"></canvas>
@@ -512,6 +530,70 @@ const keysEl     = document.getElementById('keys');
 const clockEl    = document.getElementById('clock');
 const statusPill = document.getElementById('statusPill');
 const fpsHint    = document.getElementById('fpsHint');
+const leftColEl  = document.querySelector('.left');
+const rightColEl = document.querySelector('.right');
+
+const panelLayoutDefs = [
+  { key: 'cpu',         id: 'cpuPanel',     column: 1, order: 1  },
+  { key: 'gpu',         id: 'gpuPanel',     column: 1, order: 2  },
+  { key: 'ram',         id: 'ramPanel',     column: 1, order: 3  },
+  { key: 'storage',     id: 'storagePanel', column: 1, order: 4  },
+  { key: 'network',     id: 'networkPanel', column: 1, order: 5  },
+  { key: 'power',       id: 'powerPanel',   column: 1, order: 6  },
+  { key: 'system',      id: 'systemPanel',  column: 1, order: 7  },
+  { key: 'event',       id: 'eventPanel',   column: 2, order: 1  },
+  { key: 'interactions',id: 'interPanel',   column: 2, order: 2  },
+  { key: 'keys',        id: 'keysPanel',    column: 2, order: 3  },
+  { key: 'audio',       id: 'audioPanel',   column: 2, order: 4  },
+  { key: 'wifi',        id: 'wifiPanel',    column: 2, order: 5  },
+  { key: 'bluetooth',   id: 'btPanel',      column: 2, order: 6  },
+  { key: 'displays',    id: 'displayPanel', column: 2, order: 7  },
+  { key: 'media',       id: 'mediaPanel',   column: 2, order: 8  },
+  { key: 'viz',         id: 'vizPanel',     column: 2, order: 9  },
+];
+let lastPanelLayoutSignature = '';
+
+function _panelNumber(style, name, fallback, min, max) {
+  const parsed = parseFloat(style.getPropertyValue(name));
+  if (!Number.isFinite(parsed)) return fallback;
+  const lower = Number.isFinite(min) ? min : parsed;
+  const upper = Number.isFinite(max) ? max : parsed;
+  return Math.max(lower, Math.min(upper, parsed));
+}
+
+function applyPanelLayout(force) {
+  if (!leftColEl || !rightColEl) return;
+  const style = getComputedStyle(document.documentElement);
+  const computed = [];
+
+  for (const def of panelLayoutDefs) {
+    const visible = _panelNumber(style, `--panel-${def.key}-visible`, 1, 0, 1) >= 0.5;
+    const column = Math.round(_panelNumber(style, `--panel-${def.key}-column`, def.column, 1, 2));
+    const order = _panelNumber(style, `--panel-${def.key}-order`, def.order, 1, 99);
+    computed.push({ def, visible, column, order });
+  }
+
+  const signature = computed.map(c => `${c.def.key}:${c.visible ? 1 : 0}:${c.column}:${c.order}`).join('|');
+  if (!force && signature === lastPanelLayoutSignature) return;
+  lastPanelLayoutSignature = signature;
+
+  const leftItems = [];
+  const rightItems = [];
+
+  for (const item of computed) {
+    const element = document.getElementById(item.def.id);
+    if (!element) continue;
+    element.style.display = item.visible ? '' : 'none';
+    const targetList = item.column === 1 ? leftItems : rightItems;
+    targetList.push({ element, order: item.order });
+  }
+
+  leftItems.sort((a, b) => a.order - b.order);
+  rightItems.sort((a, b) => a.order - b.order);
+
+  for (const item of leftItems) leftColEl.appendChild(item.element);
+  for (const item of rightItems) rightColEl.appendChild(item.element);
+}
 
 function initCapsUI() {
   capsEl.innerHTML = capDefs.map(c =>
@@ -554,14 +636,50 @@ function updateCPU(c) {
 /* ─── GPU panel ─── */
 function updateGPU(g) {
   const el = document.getElementById('gpuInfo');
-  const adapters = g.adapters || [];
-  const name = adapters.length > 0 ? (adapters[0].name || '—') : '—';
-  const vram = adapters.length > 0 && adapters[0].adapter_ram_bytes ? fmtBytes(adapters[0].adapter_ram_bytes) : '—';
-  el.innerHTML = `
+  const adapters = Array.isArray(g.adapters) ? g.adapters : [];
+  const selected = adapters.length > 0
+    ? adapters
+        .slice()
+        .sort((a, b) => (Number(b.usage_percent) || 0) - (Number(a.usage_percent) || 0))[0]
+    : g;
+
+  const name = selected.name || g.name || '—';
+  const usage = selected.usage_percent != null ? selected.usage_percent : g.usage_percent;
+  const tempC = selected.temperature_c != null
+    ? selected.temperature_c
+    : (g.temperature && g.temperature.average_c != null ? g.temperature.average_c : g.temperature_c);
+  const vramUsedMb = selected.vram_used_mb != null ? selected.vram_used_mb : g.vram_used_mb;
+  const vramTotalMb = selected.vram_total_mb != null ? selected.vram_total_mb : g.vram_total_mb;
+  const vramBytes = selected.adapter_ram_bytes != null ? selected.adapter_ram_bytes : (vramTotalMb != null ? vramTotalMb * 1024 * 1024 : null);
+  const gpuClock = selected.clock_graphics_mhz != null ? selected.clock_graphics_mhz : g.clock_graphics_mhz;
+  const memClock = selected.clock_memory_mhz != null ? selected.clock_memory_mhz : g.clock_memory_mhz;
+  const power = selected.power_draw_w != null ? selected.power_draw_w : g.power_draw_w;
+  const driver = selected.driver_version || g.driver_version || '—';
+
+  let html = `
     <div class="row"><span class="lbl">Adapter</span><span class="val">${name}</span></div>
-    <div class="row"><span class="lbl">VRAM</span><span class="val">${vram}</span></div>
-    <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(g.temperature)}</span></div>
+    <div class="row"><span class="lbl">Adapters</span><span class="val">${adapters.length || 1}</span></div>
+    <div class="row"><span class="lbl">VRAM</span><span class="val">${fmtBytes(vramBytes)}</span></div>
+    <div class="row"><span class="lbl">Driver</span><span class="val">${driver}</span></div>
   `;
+
+  if (usage != null) {
+    html += `<div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>`;
+    html += barHTML(usage, 100, 'rgba(220,110,70,.8)');
+  }
+  if (vramUsedMb != null && vramTotalMb != null) {
+    const usedBytes = vramUsedMb * 1024 * 1024;
+    const totalBytes = vramTotalMb * 1024 * 1024;
+    html += `<div class="row"><span class="lbl">VRAM Used</span><span class="val">${fmtBytes(usedBytes)} / ${fmtBytes(totalBytes)}</span></div>`;
+    html += barHTML(vramUsedMb, Math.max(vramTotalMb, 1), 'rgba(180,120,255,.7)');
+  }
+  html += `
+    <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(tempC)}</span></div>
+    <div class="row"><span class="lbl">GPU Clock</span><span class="val">${gpuClock != null ? gpuClock + ' MHz' : '—'}</span></div>
+    <div class="row"><span class="lbl">Mem Clock</span><span class="val">${memClock != null ? memClock + ' MHz' : '—'}</span></div>
+    <div class="row"><span class="lbl">Power</span><span class="val">${power != null ? Number(power).toFixed(1) + ' W' : '—'}</span></div>
+  `;
+  el.innerHTML = html;
 }
 
 /* ─── RAM panel ─── */
@@ -657,12 +775,22 @@ function updatePower(p) {
 /* ─── System info panel ─── */
 function updateSystem(s) {
   const el = document.getElementById('systemInfo');
+  const os = s.os || {};
+  const osName = os.long_name || os.name || s.os_name || s.os || '—';
+  const osVersion = os.version || s.os_version || '—';
+  const user = s.username || s.user_name || s.user || '—';
+  const arch = os.cpu_arch || os.arch || s.architecture || s.arch || '—';
+  const board = s.motherboard && (s.motherboard.manufacturer || s.motherboard.product)
+    ? `${s.motherboard.manufacturer || ''} ${s.motherboard.product || ''}`.trim()
+    : '—';
   el.innerHTML = `
-    <div class="row"><span class="lbl">Hostname</span><span class="val">${s.hostname || '—'}</span></div>
-    <div class="row"><span class="lbl">OS</span><span class="val">${s.os_name || s.os || '—'}</span></div>
-    <div class="row"><span class="lbl">Version</span><span class="val">${s.os_version || '—'}</span></div>
+    <div class="row"><span class="lbl">Hostname</span><span class="val">${s.hostname || s.computer_name || '—'}</span></div>
+    <div class="row"><span class="lbl">OS</span><span class="val">${osName}</span></div>
+    <div class="row"><span class="lbl">Version</span><span class="val">${osVersion}</span></div>
+    <div class="row"><span class="lbl">User</span><span class="val">${user}</span></div>
     <div class="row"><span class="lbl">Uptime</span><span class="val">${s.uptime_seconds != null ? fmtUptime(s.uptime_seconds) : '—'}</span></div>
-    <div class="row"><span class="lbl">Arch</span><span class="val">${s.architecture || s.arch || '—'}</span></div>
+    <div class="row"><span class="lbl">Arch</span><span class="val">${arch}</span></div>
+    <div class="row"><span class="lbl">Board</span><span class="val">${board}</span></div>
   `;
 }
 
@@ -681,9 +809,15 @@ function fmtUptime(sec) {
 /* ─── Wi-Fi panel ─── */
 function updateWifi(w) {
   const el = document.getElementById('wifiInfo');
-  const connected = w.connected === true;
-  const ssid = w.ssid || '—';
-  const signal = w.signal_percent != null ? w.signal_percent : null;
+  const conn = (w && typeof w.connected === 'object') ? w.connected : {};
+  const connected = w.connected === true || conn.is_connected === true || String(conn.state || '').toLowerCase() === 'connected';
+  const ssid = conn.ssid || w.ssid || conn.profile || '—';
+  const signal = conn.signal_percent != null ? conn.signal_percent : (w.signal_percent != null ? w.signal_percent : null);
+  const channel = conn.channel != null ? conn.channel : w.channel;
+  const band = conn.band || w.band;
+  const rxMbps = conn.receive_rate_mbps;
+  const txMbps = conn.transmit_rate_mbps;
+  const iface = (Array.isArray(w.interfaces) && w.interfaces.length > 0) ? w.interfaces[0] : null;
   let html = `<div class="row"><span class="lbl">Status</span><span class="val">${connected ? 'Connected' : 'Disconnected'}</span></div>`;
   if (connected) {
     html += `<div class="row"><span class="lbl">SSID</span><span class="val">${ssid}</span></div>`;
@@ -691,8 +825,14 @@ function updateWifi(w) {
       html += `<div class="row"><span class="lbl">Signal</span><span class="val">${signal}%</span></div>`;
       html += barHTML(signal, 100, 'rgba(80,180,255,.75)');
     }
-    if (w.frequency_mhz) html += `<div class="row"><span class="lbl">Freq</span><span class="val">${w.frequency_mhz} MHz</span></div>`;
-    if (w.channel) html += `<div class="row"><span class="lbl">Channel</span><span class="val">${w.channel}</span></div>`;
+    if (band) html += `<div class="row"><span class="lbl">Band</span><span class="val">${band}</span></div>`;
+    if (channel != null) html += `<div class="row"><span class="lbl">Channel</span><span class="val">${channel}</span></div>`;
+    if (rxMbps != null || txMbps != null) {
+      html += `<div class="row"><span class="lbl">Link</span><span class="val">${rxMbps != null ? rxMbps + '↓' : '—'} / ${txMbps != null ? txMbps + '↑' : '—'} Mbps</span></div>`;
+    }
+  } else if (iface) {
+    html += `<div class="row"><span class="lbl">Interface</span><span class="val">${iface.name || iface.description || '—'}</span></div>`;
+    html += `<div class="row"><span class="lbl">Adapter</span><span class="val">${iface.status || '—'}</span></div>`;
   }
   el.innerHTML = html;
 }
@@ -700,14 +840,38 @@ function updateWifi(w) {
 /* ─── Bluetooth panel ─── */
 function updateBluetooth(b) {
   const el = document.getElementById('btInfo');
-  const available = b.available === true || b.enabled === true;
-  const devices = b.devices || b.connected_devices || [];
+  const adapter = b.adapter || {};
+  const adapterStatus = String(adapter.status || '').toLowerCase();
+  const available = b.available === true
+    || b.enabled === true
+    || adapter.present === true
+    || adapterStatus === 'ok'
+    || adapterStatus === 'on'
+    || adapterStatus === 'up'
+    || adapterStatus === 'enabled';
+  const devicesRaw = Array.isArray(b.devices)
+    ? b.devices
+    : (Array.isArray(b.connected_devices) ? b.connected_devices : []);
+  const devices = devicesRaw
+    .map(d => {
+      if (typeof d === 'string') {
+        return { name: d, connected: false, key: d.toLowerCase() };
+      }
+      const name = d.name || d.address || '?';
+      return {
+        name,
+        connected: !!d.connected,
+        key: `${String(name).toLowerCase()}|${String(d.address || '').toLowerCase()}`
+      };
+    })
+    .sort((a, b2) => a.key.localeCompare(b2.key));
+  const connectedCount = devices.filter(d => d.connected).length;
   let html = `<div class="row"><span class="lbl">Status</span><span class="val">${available ? 'Available' : 'Off'}</span></div>`;
+  if (adapter.name) html += `<div class="row"><span class="lbl">Adapter</span><span class="val">${adapter.name}</span></div>`;
   if (devices.length > 0) {
-    html += `<div class="row"><span class="lbl">Devices</span><span class="val">${devices.length}</span></div>`;
+    html += `<div class="row"><span class="lbl">Devices</span><span class="val">${devices.length} (${connectedCount} connected)</span></div>`;
     for (const d of devices.slice(0, 4)) {
-      const name = typeof d === 'string' ? d : (d.name || '?');
-      html += `<div class="row"><span class="lbl" style="padding-left:8px">·</span><span class="val">${name}</span></div>`;
+      html += `<div class="row"><span class="lbl" style="padding-left:8px">·</span><span class="val">${d.name}${d.connected ? ' (Connected)' : ''}</span></div>`;
     }
   } else {
     html += `<div class="row"><span class="lbl">Devices</span><span class="val">0</span></div>`;
@@ -734,12 +898,16 @@ function updateDisplays(monitors) {
   }
   let html = `<div class="row"><span class="lbl">Monitors</span><span class="val">${monitors.length}</span></div>`;
   for (const m of monitors.slice(0, 4)) {
-    const label = m.primary ? '★ Primary' : (m.device_name || 'Display');
-    const res = `${m.width || '?'}×${m.height || '?'}`;
-    const hz = m.refresh_rate_hz ? ` @ ${m.refresh_rate_hz}Hz` : '';
+    const meta = (m && typeof m === 'object' && m.metadata) ? m.metadata : m;
+    const label = meta.primary ? '★ Primary' : (meta.monitor_name || meta.device_name || 'Display');
+    const width = meta.width ?? (meta.size && meta.size.width);
+    const height = meta.height ?? (meta.size && meta.size.height);
+    const hzVal = meta.refresh_rate_hz ?? meta.hz;
+    const res = `${width || '?'}×${height || '?'}`;
+    const hz = hzVal ? ` @ ${hzVal}Hz` : '';
     html += `<div class="row"><span class="lbl">${label}</span><span class="val">${res}${hz}</span></div>`;
-    if (m.scale && m.scale !== 1) {
-      html += `<div class="row"><span class="lbl" style="padding-left:8px">Scale</span><span class="val">${(m.scale * 100).toFixed(0)}%</span></div>`;
+    if (meta.scale && meta.scale !== 1) {
+      html += `<div class="row"><span class="lbl" style="padding-left:8px">Scale</span><span class="val">${(meta.scale * 100).toFixed(0)}%</span></div>`;
     }
   }
   el.innerHTML = html;
@@ -748,7 +916,9 @@ function updateDisplays(monitors) {
 /* ─── Processes panel ─── */
 function updateProcesses(p) {
   const el = document.getElementById('processInfo');
-  const total = p.total != null ? p.total : (p.count != null ? p.count : '—');
+  const total = p.total_count != null
+    ? p.total_count
+    : (p.total != null ? p.total : (p.count != null ? p.count : '—'));
   const topCpu = (p.top_cpu || []).slice(0, 3);
   const topMem = (p.top_memory || []).slice(0, 3);
   let html = `<div class="row"><span class="lbl">Total</span><span class="val">${total}</span></div>`;
@@ -771,14 +941,91 @@ function updateProcesses(p) {
   el.innerHTML = html;
 }
 
-/* ─── Media session (inside audio subscription) ─── */
-function updateMediaSession(a) {
+const mediaSessionState = {
+  snapshot: null,
+  receivedAtMs: 0,
+  basePositionMs: 0,
+  displayedPositionMs: 0,
+  sessionKey: ''
+};
+
+function mediaSessionKey(ms) {
+  if (!ms) return '';
+  const timeline = ms.timeline || {};
+  return [
+    ms.source_app_id || '',
+    ms.title || '',
+    ms.artist || '',
+    ms.album || '',
+    ms.track_number || '',
+    timeline.duration_ms || ''
+  ].join('|');
+}
+
+function shouldAllowMediaBackwardReset(ms, incomingPos, currentPos) {
+  const timeline = (ms && ms.timeline) || {};
+  const duration = Number(timeline.duration_ms) || 0;
+
+  // Track restart/loop near the end -> allow reset to beginning.
+  if (duration > 0 && currentPos > duration - 5000 && incomingPos < 5000) {
+    return true;
+  }
+
+  // Explicit seeks/jumps should still be possible when large.
+  const delta = currentPos - incomingPos;
+  return delta > 20000;
+}
+
+function mediaIsAdvancing(ms) {
+  if (!ms) return false;
+  const status = String(ms.playback_status || '').toLowerCase();
+  return ms.playing === true || status === 'playing';
+}
+
+function getRenderedMediaSession() {
+  const ms = mediaSessionState.snapshot;
+  if (!ms) return null;
+
+  const out = {
+    ...ms,
+    timeline: ms.timeline ? { ...ms.timeline } : null
+  };
+
+  if (!out.timeline || !mediaIsAdvancing(out)) {
+    if (out.timeline && Number.isFinite(out.timeline.position_ms)) {
+      mediaSessionState.displayedPositionMs = Math.max(0, Number(out.timeline.position_ms) || 0);
+    }
+    return out;
+  }
+
+  const rate = Number.isFinite(out.playback_rate) && out.playback_rate > 0
+    ? out.playback_rate
+    : 1;
+  const elapsedMs = Math.max(0, Date.now() - mediaSessionState.receivedAtMs);
+  let positionMs = mediaSessionState.basePositionMs + elapsedMs * rate;
+
+  if (Number.isFinite(out.timeline.duration_ms) && out.timeline.duration_ms > 0) {
+    positionMs = Math.min(positionMs, out.timeline.duration_ms);
+  }
+  if (Number.isFinite(out.timeline.end_ms) && Number.isFinite(out.timeline.start_ms)) {
+    const maxTimelinePos = Math.max(0, out.timeline.end_ms - out.timeline.start_ms);
+    positionMs = Math.min(positionMs, maxTimelinePos);
+  }
+
+  out.timeline.position_ms = Math.max(0, Math.floor(positionMs));
+  mediaSessionState.displayedPositionMs = out.timeline.position_ms;
+  return out;
+}
+
+function renderMediaSession(ms) {
   const el = document.getElementById('mediaInfo');
-  const ms = a.media_session;
-  if (!ms || ms.playing === false && !ms.title) {
+  if (!el) return;
+
+  if (!ms || (ms.playing === false && !ms.title)) {
     el.innerHTML = `<div class="row"><span class="lbl">Nothing playing</span></div>`;
     return;
   }
+
   const status = ms.playback_status || (ms.playing ? 'playing' : 'stopped');
   let html = `<div class="row"><span class="lbl">Status</span><span class="val">${status}</span></div>`;
   if (ms.title) html += `<div class="row"><span class="lbl">Title</span><span class="val">${ms.title}</span></div>`;
@@ -793,6 +1040,40 @@ function updateMediaSession(a) {
   if (ms.shuffle === true) html += `<div class="row"><span class="lbl">Shuffle</span><span class="val">On</span></div>`;
   if (ms.repeat_mode && ms.repeat_mode !== 'none') html += `<div class="row"><span class="lbl">Repeat</span><span class="val">${ms.repeat_mode}</span></div>`;
   el.innerHTML = html;
+}
+
+/* ─── Media session (inside audio subscription) ─── */
+function updateMediaSession(a) {
+  const nextMs = a && a.media_session ? a.media_session : null;
+  if (!nextMs) {
+    mediaSessionState.snapshot = null;
+    mediaSessionState.basePositionMs = 0;
+    mediaSessionState.displayedPositionMs = 0;
+    mediaSessionState.sessionKey = '';
+    renderMediaSession(null);
+    return;
+  }
+
+  const incomingPos = Number(nextMs.timeline && nextMs.timeline.position_ms) || 0;
+  const nextKey = mediaSessionKey(nextMs);
+  const sameSession = mediaSessionState.sessionKey && mediaSessionState.sessionKey === nextKey;
+  let basePos = incomingPos;
+
+  if (sameSession && mediaIsAdvancing(nextMs)) {
+    const floorPos = Math.max(0, Number(mediaSessionState.displayedPositionMs) || 0);
+    if (incomingPos + 1200 < floorPos && !shouldAllowMediaBackwardReset(nextMs, incomingPos, floorPos)) {
+      basePos = floorPos;
+    }
+  } else {
+    mediaSessionState.displayedPositionMs = incomingPos;
+  }
+
+  mediaSessionState.snapshot = nextMs;
+  mediaSessionState.sessionKey = nextKey;
+  mediaSessionState.receivedAtMs = Date.now();
+  mediaSessionState.basePositionMs = basePos;
+
+  renderMediaSession(getRenderedMediaSession());
 }
 
 function fmtTimeMs(ms) {
@@ -831,17 +1112,13 @@ Sentinel.subscribe('bluetooth', b => updateBluetooth(b));
 Sentinel.subscribe('idle',      d => updateIdle(d));
 Sentinel.subscribe('processes', p => updateProcesses(p));
 
-// Displays come as separate entries; use the raw registry event
-let _displaysHandled = false;
-Sentinel.on('registry', d => {
-  // Displays are individual sysdata entries with category "display"
-  // The SDK maps full sysdata as d.sysdata; we also look for 'displays' key
-  if (d && d.sysdata) {
-    const disp = d.sysdata.displays;
-    if (disp) {
-      updateDisplays(Array.isArray(disp) ? disp : (disp.monitors || []));
-    }
-  }
+// Displays are in sysdata.displays. Subscribe directly so updates only fire
+// when display data changes (avoids unnecessary 100ms panel re-renders).
+Sentinel.subscribe('displays', disp => {
+  updateDisplays(Array.isArray(disp) ? disp : (disp && disp.monitors) || []);
+});
+
+Sentinel.on('registry', () => {
   ping('registry');
 });
 
@@ -916,18 +1193,47 @@ Sentinel.on('resume', () => {
   statusPill.textContent = 'running';
 });
 
+setInterval(() => {
+  if (!mediaSessionState.snapshot) return;
+  if (!mediaIsAdvancing(mediaSessionState.snapshot)) return;
+  renderMediaSession(getRenderedMediaSession());
+}, 250);
+
 /* ═══════════════ DRAWING ═══════════════ */
 function resize() {
-  W = C.width  = innerWidth;
-  H = C.height = innerHeight;
+  const prevW = W;
+  const prevH = H;
+  W = innerWidth;
+  H = innerHeight;
+  const viewportChanged = prevW !== W || prevH !== H;
+
+  if (viewportChanged || C.width !== W || C.height !== H) {
+    C.width = W;
+    C.height = H;
+  }
+
+  // Resolution-normalized HUD scaling so panel proportions remain consistent
+  // across monitor sizes (e.g. 1080p vs 1440p), with user multiplier support.
+  const rootStyle = getComputedStyle(document.documentElement);
+  const userScale = parseFloat(rootStyle.getPropertyValue('--ui-scale-multiplier'));
+  const multiplier = Number.isFinite(userScale) && userScale > 0 ? userScale : 1;
+  const autoScale = Math.min(Math.max(0.2, W / 1920), Math.max(0.2, H / 1080));
+  const finalScale = Math.max(0.2, Math.min(3, autoScale * multiplier));
+  document.documentElement.style.setProperty('--ui-scale', finalScale.toFixed(4));
 
   // Size both canvases to the same container (they overlap)
   const vp = FC.parentElement;
   if (vp) {
     const cw = vp.clientWidth - 24;
     const ch = vp.clientHeight - 38;
-    FC.width = cw; FC.height = ch;
-    LC.width = cw; LC.height = ch;
+    if (FC.width !== cw || FC.height !== ch) {
+      FC.width = cw;
+      FC.height = ch;
+    }
+    if (LC.width !== cw || LC.height !== ch) {
+      LC.width = cw;
+      LC.height = ch;
+    }
   }
 
   if (!stars.length) {
@@ -938,42 +1244,44 @@ function resize() {
     });
   }
 
-  // Generate warden mesh nodes
-  wardenNodes.length = 0;
-  for (let i = 0; i < WARDEN_NODE_COUNT; i++) {
-    wardenNodes.push({
-      baseX: Math.random() * W, baseY: Math.random() * H,
-      x: 0, y: 0,
-      phase: Math.random() * 6.28,
-      size: 1.5 + Math.random() * 2.5
-    });
-  }
+  if (viewportChanged || !wardenNodes.length || !embers.length || !tendrils.length) {
+    // Generate warden mesh nodes
+    wardenNodes.length = 0;
+    for (let i = 0; i < WARDEN_NODE_COUNT; i++) {
+      wardenNodes.push({
+        baseX: Math.random() * W, baseY: Math.random() * H,
+        x: 0, y: 0,
+        phase: Math.random() * 6.28,
+        size: 1.5 + Math.random() * 2.5
+      });
+    }
 
-  // Generate embers
-  embers.length = 0;
-  for (let i = 0; i < EMBER_COUNT; i++) {
-    embers.push({
-      x: Math.random() * W, y: Math.random() * H,
-      vx: (Math.random() - .5) * .5, vy: -(Math.random() * .4 + .1),
-      size: .5 + Math.random() * 2.5,
-      brightness: .3 + Math.random() * .7,
-      phase: Math.random() * 6.28
-    });
-  }
+    // Generate embers
+    embers.length = 0;
+    for (let i = 0; i < EMBER_COUNT; i++) {
+      embers.push({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - .5) * .5, vy: -(Math.random() * .4 + .1),
+        size: .5 + Math.random() * 2.5,
+        brightness: .3 + Math.random() * .7,
+        phase: Math.random() * 6.28
+      });
+    }
 
-  // Generate guardian tendrils (bezier control points)
-  tendrils.length = 0;
-  for (let i = 0; i < TENDRIL_COUNT; i++) {
-    const angle = (i / TENDRIL_COUNT) * Math.PI * 2;
-    const len = Math.min(W, H) * (.25 + Math.random() * .2);
-    tendrils.push({
-      angle,
-      length: len,
-      phase: Math.random() * 6.28,
-      speed: .003 + Math.random() * .004,
-      amplitude: 20 + Math.random() * 40,
-      nodes: 5 + Math.floor(Math.random() * 4)
-    });
+    // Generate guardian tendrils (bezier control points)
+    tendrils.length = 0;
+    for (let i = 0; i < TENDRIL_COUNT; i++) {
+      const angle = (i / TENDRIL_COUNT) * Math.PI * 2;
+      const len = Math.min(W, H) * (.25 + Math.random() * .2);
+      tendrils.push({
+        angle,
+        length: len,
+        phase: Math.random() * 6.28,
+        speed: .003 + Math.random() * .004,
+        amplitude: 20 + Math.random() * 40,
+        nodes: 5 + Math.floor(Math.random() * 4)
+      });
+    }
   }
 }
 
@@ -981,6 +1289,8 @@ function resize() {
 let acR = 200, acG = 50, acB = 40;
 let emR = 255, emG = 170, emB = 60;
 let bgR = 10, bgG = 4, bgB = 6;
+let lastAccentCss = '';
+let lastEmberCss = '';
 
 function _hexRgb(h) {
   h = (h || '').replace('#', '');
@@ -988,16 +1298,67 @@ function _hexRgb(h) {
   return [parseInt(h.substring(0,2),16)||0, parseInt(h.substring(2,4),16)||0, parseInt(h.substring(4,6),16)||0];
 }
 
+function _cssColorToRgb(value, fallback) {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+
+  if (raw.startsWith('#')) {
+    return _hexRgb(raw);
+  }
+
+  const rgbMatch = raw.match(/^rgba?\(([^)]+)\)$/i);
+  if (rgbMatch) {
+    const parts = rgbMatch[1].split(',').map(p => parseFloat(p.trim()));
+    if (parts.length >= 3) {
+      return [
+        Math.max(0, Math.min(255, parts[0] || 0)) | 0,
+        Math.max(0, Math.min(255, parts[1] || 0)) | 0,
+        Math.max(0, Math.min(255, parts[2] || 0)) | 0,
+      ];
+    }
+  }
+
+  return fallback;
+}
+
 function readThemeVars() {
   const s = getComputedStyle(document.documentElement);
   const _i = (v, d) => { const n = parseInt(v); return Number.isFinite(n) ? n : d; };
-  const _f = (v, d) => { const n = parseFloat(v); return Number.isFinite(n) ? n : d; };
-  acR = _i(s.getPropertyValue('--accent-r'), 200);
-  acG = _i(s.getPropertyValue('--accent-g'), 50);
-  acB = _i(s.getPropertyValue('--accent-b'), 40);
-  emR = _i(s.getPropertyValue('--ember-r'), 255);
-  emG = _i(s.getPropertyValue('--ember-g'), 170);
-  emB = _i(s.getPropertyValue('--ember-b'), 60);
+  const accentHex = (s.getPropertyValue('--accent') || '').trim();
+  const emberHex = (s.getPropertyValue('--ember') || '').trim();
+
+  if (accentHex) {
+    [acR, acG, acB] = _cssColorToRgb(accentHex, [200, 50, 40]);
+  } else {
+    acR = _i(s.getPropertyValue('--accent-r'), 200);
+    acG = _i(s.getPropertyValue('--accent-g'), 50);
+    acB = _i(s.getPropertyValue('--accent-b'), 40);
+  }
+
+  if (emberHex) {
+    [emR, emG, emB] = _cssColorToRgb(emberHex, [255, 170, 60]);
+  } else {
+    emR = _i(s.getPropertyValue('--ember-r'), 255);
+    emG = _i(s.getPropertyValue('--ember-g'), 170);
+    emB = _i(s.getPropertyValue('--ember-b'), 60);
+  }
+
+  if (accentHex && accentHex !== lastAccentCss) {
+    const root = document.documentElement.style;
+    root.setProperty('--accent-r', String(acR));
+    root.setProperty('--accent-g', String(acG));
+    root.setProperty('--accent-b', String(acB));
+    lastAccentCss = accentHex;
+  }
+
+  if (emberHex && emberHex !== lastEmberCss) {
+    const root = document.documentElement.style;
+    root.setProperty('--ember-r', String(emR));
+    root.setProperty('--ember-g', String(emG));
+    root.setProperty('--ember-b', String(emB));
+    lastEmberCss = emberHex;
+  }
+
   const bg = _hexRgb(s.getPropertyValue('--bg-color'));
   bgR = bg[0]; bgG = bg[1]; bgB = bg[2];
   if (!bgR && !bgG && !bgB) { bgR = 10; bgG = 4; bgB = 6; } // fallback for missing var
@@ -1029,7 +1390,7 @@ function drawBG() {
   // ── Diamond lattice background ──
   const latticePx = parallaxX * .08;
   const latticePy = parallaxY * .08;
-  const spacing = 80;
+  const spacing = Math.max(20, parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lattice-spacing')) || 80);
   X.strokeStyle = `rgba(${_a(.6)},${(.03 + audio * .015).toFixed(3)})`;
   X.lineWidth = .4;
   for (let i = -H; i < W + H; i += spacing) {
@@ -1142,6 +1503,22 @@ function drawBG() {
     pulseWaves.push({ r: 10, life: 1, maxR: Math.max(W, H) * .6 });
   }
 
+  // ── Foreground depth particles (near-camera layer) ──
+  for (const s of stars) {
+    if (s.z < 1.05) continue;
+    const sx = s.x + parallaxX * s.z * 1.25;
+    const sy = s.y + parallaxY * s.z * 1.2;
+    if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
+    const twinkle = s.brightness + Math.sin(s.t + frame * .0015) * .1;
+    const alpha = Math.max(0, twinkle * (.05 + audio * .05));
+    const sr = .9 + s.z * 2.1;
+    const fg = X.createRadialGradient(sx, sy, 0, sx, sy, sr * 2.8);
+    fg.addColorStop(0, `rgba(${_a(.9)},${alpha.toFixed(3)})`);
+    fg.addColorStop(1, 'rgba(0,0,0,0)');
+    X.fillStyle = fg;
+    X.beginPath(); X.arc(sx, sy, sr * 2.8, 0, Math.PI * 2); X.fill();
+  }
+
   X.globalCompositeOperation = 'source-over';
 }
 
@@ -1150,8 +1527,21 @@ function drawCore() {
   const cy = H * .46 + (my - .5) * 28;
   const baseR = Math.min(W, H) * .1;
   const r = baseR + audio * 25 + Math.sin(breathPhase) * 4;
+  const depthX = (mx - .5) * 42;
+  const depthY = (my - .5) * 24;
+  const backX = cx - depthX * .38;
+  const backY = cy - depthY * .38;
+  const frontX = cx + depthX * .28;
+  const frontY = cy + depthY * .28;
 
   X.globalCompositeOperation = 'screen';
+
+  // ── Rear depth haze ──
+  const rear = X.createRadialGradient(backX, backY, 0, backX, backY, r * 3.8);
+  rear.addColorStop(0, `rgba(${_a(.55)},${(.08 + audio * .04).toFixed(3)})`);
+  rear.addColorStop(1, 'rgba(0,0,0,0)');
+  X.fillStyle = rear;
+  X.beginPath(); X.arc(backX, backY, r * 3.8, 0, Math.PI * 2); X.fill();
 
   // ── Ambient glow ──
   const g = X.createRadialGradient(cx, cy, 0, cx, cy, r * 4.5);
@@ -1178,6 +1568,9 @@ function drawCore() {
       const py = cy + Math.sin(baseAng) * dist + Math.sin(perpAng) * wave;
       s === 0 ? X.moveTo(px, py) : X.lineTo(px, py);
     }
+    X.strokeStyle = `rgba(0,0,0,${(.16 + audio * .05).toFixed(3)})`;
+    X.lineWidth = 6;
+    X.stroke();
     const tendrilAlpha = .08 + audio * .06;
     X.strokeStyle = `rgba(${_a(1)},${tendrilAlpha.toFixed(3)})`;
     X.lineWidth = 1.5;
@@ -1253,6 +1646,13 @@ function drawCore() {
   X.fillStyle = `rgba(${_e(1.41,3.67)},${(.6 + audio * .3).toFixed(3)})`;
   X.beginPath(); X.arc(cx, cy, coreR * .4, 0, Math.PI * 2); X.fill();
 
+  // Foreground rim haze (adds literal front layer depth)
+  const front = X.createRadialGradient(frontX, frontY, 0, frontX, frontY, r * 2.9);
+  front.addColorStop(0, `rgba(${_e(.7,1.1)},${(.06 + audio * .04).toFixed(3)})`);
+  front.addColorStop(.65, 'rgba(0,0,0,0)');
+  X.fillStyle = front;
+  X.beginPath(); X.arc(frontX, frontY, r * 2.9, 0, Math.PI * 2); X.fill();
+
   // ── Heartbeat pulse waves (diamond-shaped) ──
   for (let i = pulseWaves.length - 1; i >= 0; i--) {
     const pw = pulseWaves[i];
@@ -1274,20 +1674,19 @@ function drawCore() {
   // ── Sentinel text arc ──
   X.save();
   X.translate(cx, cy);
-  X.rotate(-frame * .0015);
-  const textR = r * 1.4;
-  X.font = '9px Consolas, monospace';
-  X.fillStyle = `rgba(${_a(1)},${(.1 + audio * .05).toFixed(3)})`;
-  const label = '◈ SENTINEL ◈ VIGILANT ◈ GUARDIAN ◈ ';
+  X.rotate(-frame * .00045);
+  const textR = r * 1.52;
+  X.font = '11px "Segoe UI", Consolas, monospace';
+  X.fillStyle = `rgba(${_a(1)},${(.22 + audio * .12).toFixed(3)})`;
+  const label = 'SENTINEL • VIGILANT • GUARDIAN • ';
   const charAngle = (Math.PI * 2) / label.length;
+  X.textAlign = 'center';
+  X.textBaseline = 'middle';
   for (let i = 0; i < label.length; i++) {
     const a = charAngle * i;
     X.save();
-    X.rotate(a);
-    X.translate(0, -textR);
-    X.rotate(Math.PI);
-    X.scale(1, -1);
-    X.fillText(label[i], 0, 0);
+    X.rotate(a + Math.PI / 2);
+    X.fillText(label[i], 0, -textR);
     X.restore();
   }
   X.restore();
@@ -1570,9 +1969,21 @@ function loop(now) {
     }
   }
 
+  // Accessibility + responsiveness split:
+  // keep background calmer, but allow stronger motion in the core/tentacles.
+  const rawAudio = audio;
+  const backgroundAudioCap = 0.12;
+  const coreReactiveBoost = 1.9;
+  const coreAudioCap = 0.34;
+
+  audio = Math.min(rawAudio, backgroundAudioCap);
   drawBG();
+
+  audio = Math.min(rawAudio * coreReactiveBoost, coreAudioCap);
   drawCore();
   drawTrailsAndRipples();
+
+  audio = rawAudio;
 
   // Subtle brightness lift
   X.globalCompositeOperation = 'screen';
@@ -1638,6 +2049,28 @@ addEventListener('message', function(event) {
   if (!data || typeof data !== 'object') return;
   if (data.type === '__sentinel_set_css_var' && data.variable && data.value != null) {
     document.documentElement.style.setProperty(data.variable, data.value);
+    if (data.variable === '--ui-scale-multiplier') resize();
+    if (data.variable === '--bg-color' || data.variable === '--accent' || data.variable === '--ember') readThemeVars();
+    if (data.variable.indexOf('--panel-') === 0) applyPanelLayout(false);
+  }
+});
+
+Sentinel.on('cssvarchange', function(vars) {
+  if (!vars || typeof vars !== 'object') return;
+  if (Object.prototype.hasOwnProperty.call(vars, '--ui-scale-multiplier')) resize();
+  if (
+    Object.prototype.hasOwnProperty.call(vars, '--bg-color') ||
+    Object.prototype.hasOwnProperty.call(vars, '--accent') ||
+    Object.prototype.hasOwnProperty.call(vars, '--ember')
+  ) {
+    readThemeVars();
+  }
+  for (var key in vars) {
+    if (!Object.prototype.hasOwnProperty.call(vars, key)) continue;
+    if (key.indexOf('--panel-') === 0) {
+      applyPanelLayout(false);
+      break;
+    }
   }
 });
 
@@ -1655,6 +2088,7 @@ addEventListener('message', function(event) {
 })();
 
 resize();
+applyPanelLayout(true);
 initCapsUI();
 requestAnimationFrame(loop);
 </script>

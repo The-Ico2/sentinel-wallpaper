@@ -48,6 +48,20 @@ function getInitialCardColumns() {
 let cardColumns = getInitialCardColumns();
 let saveStatus = '';
 
+const PREVIEW_DATA_POLL_MS = 1000;
+const PREVIEW_DEFAULT_WIDTH = 1920;
+const PREVIEW_DEFAULT_HEIGHT = 1080;
+
+const editorPreviewState = {
+  iframe: null,
+  canvas: null,
+  stage: null,
+  resizeRaf: null,
+  dataTimer: null,
+  inFlight: false,
+  lastRegistryHash: ''
+};
+
 const assignmentState = {
   selectedMonitorIds: new Set(),
   assignments: normalizeAssignments(wallpaperData.assignments || {})
@@ -749,15 +763,13 @@ function buildEditableControl(key, entry, item, iframe) {
     colorInput.value = hexVal;
     const hexSpan = document.createElement('span');
     hexSpan.className = 'color-hex';
-    hexSpan.textContent = value || hexVal;
+    hexSpan.textContent = hexVal;
     wrap.appendChild(colorInput);
     wrap.appendChild(hexSpan);
     row.appendChild(wrap);
 
     colorInput.addEventListener('input', () => {
-      // Preserve alpha if original had one
-      const origAlpha = typeof value === 'string' && value.length === 9 ? value.substring(7) : '';
-      const newVal = colorInput.value + origAlpha;
+      const newVal = colorInput.value;
       hexSpan.textContent = newVal;
       onValueChange(newVal);
     });
@@ -893,7 +905,7 @@ function loadEditor() {
         </div>
         <div class="editor-preview-canvas" id="editor-preview-canvas">
           ${htmlUrl
-            ? `<iframe id="editor-wallpaper-frame" src="${escapeHtml(htmlUrl)}" title="${escapeHtml(item.name || item.id)}"></iframe>`
+            ? `<div class="editor-preview-stage" id="editor-preview-stage"><iframe id="editor-wallpaper-frame" src="${escapeHtml(htmlUrl)}" title="${escapeHtml(item.name || item.id)}"></iframe></div>`
             : item.preview_url
               ? `<img src="${escapeHtml(item.preview_url)}" alt="${escapeHtml(item.name || item.id)}" />`
               : `<div class="preview-placeholder">
@@ -917,7 +929,17 @@ function loadEditor() {
   `;
 
   const iframe = document.getElementById('editor-wallpaper-frame');
+  const previewCanvas = document.getElementById('editor-preview-canvas');
+  const previewStage = document.getElementById('editor-preview-stage');
   const propsContainer = document.getElementById('editor-properties');
+
+  editorPreviewState.iframe = iframe || null;
+  editorPreviewState.canvas = previewCanvas || null;
+  editorPreviewState.stage = previewStage || null;
+
+  if (!iframe) {
+    stopEditorPreviewDataSync();
+  }
 
   if (!hasEditable) {
     const emptyMsg = document.createElement('div');
@@ -975,7 +997,10 @@ function loadEditor() {
   if (iframe && htmlUrl) {
     iframe.addEventListener('load', () => {
       applyAllEditableVars(editable, iframe);
+      scheduleEditorPreviewLayout();
+      startEditorPreviewDataSync(iframe);
     });
+    scheduleEditorPreviewLayout();
   }
 
   initCustomSelects(root);
@@ -998,6 +1023,158 @@ function applyAllEditableVars(editable, iframe) {
       });
     }
   });
+}
+
+function getPreviewTargetMonitor() {
+  ensureSelectedMonitor();
+  const selectedIds = Array.from(assignmentState.selectedMonitorIds || []);
+  let monitor = null;
+
+  if (selectedIds.length > 0) {
+    monitor = monitors.find(m => m && m.id === selectedIds[0]) || null;
+  }
+  if (!monitor) {
+    monitor = monitors.find(m => m && m.primary) || monitors[0] || null;
+  }
+  if (!monitor) {
+    return {
+      pxWidth: PREVIEW_DEFAULT_WIDTH,
+      pxHeight: PREVIEW_DEFAULT_HEIGHT,
+      scale: 1
+    };
+  }
+
+  const physical = toPhysicalMonitor(monitor);
+  return {
+    pxWidth: Math.max(1, physical.pxWidth || PREVIEW_DEFAULT_WIDTH),
+    pxHeight: Math.max(1, physical.pxHeight || PREVIEW_DEFAULT_HEIGHT),
+    scale: Number(physical.scale) > 0 ? Number(physical.scale) : 1
+  };
+}
+
+function applyEditorPreviewLayout() {
+  const iframe = editorPreviewState.iframe;
+  const canvas = editorPreviewState.canvas;
+  const stage = editorPreviewState.stage;
+  if (!iframe || !canvas || !stage) return;
+
+  const monitor = getPreviewTargetMonitor();
+  const logicalWidth = Math.max(320, Math.round(monitor.pxWidth / monitor.scale));
+  const logicalHeight = Math.max(180, Math.round(monitor.pxHeight / monitor.scale));
+
+  const rect = canvas.getBoundingClientRect();
+  const availableWidth = Math.max(120, rect.width - 20);
+  const availableHeight = Math.max(120, rect.height - 20);
+  const fitScale = Math.min(availableWidth / logicalWidth, availableHeight / logicalHeight);
+  const safeScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1;
+  const usedWidth = logicalWidth * safeScale;
+  const usedHeight = logicalHeight * safeScale;
+  const offsetLeft = Math.max(0, (rect.width - usedWidth) * 0.5);
+  const offsetTop = Math.max(0, (rect.height - usedHeight) * 0.5);
+
+  stage.style.width = `${logicalWidth}px`;
+  stage.style.height = `${logicalHeight}px`;
+  stage.style.left = `${offsetLeft.toFixed(2)}px`;
+  stage.style.top = `${offsetTop.toFixed(2)}px`;
+  stage.style.transform = `scale(${safeScale})`;
+}
+
+function scheduleEditorPreviewLayout() {
+  if (editorPreviewState.resizeRaf != null) return;
+  editorPreviewState.resizeRaf = window.requestAnimationFrame(() => {
+    editorPreviewState.resizeRaf = null;
+    applyEditorPreviewLayout();
+  });
+}
+
+function getParentRegistrySnapshot() {
+  if (!window.parent || window.parent === window) return null;
+  try {
+    const data = window.parent.__lastRegistryData;
+    if (data && typeof data === 'object' && data.sysdata) {
+      return data;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function fetchRegistrySnapshotFromHost() {
+  const candidates = ['sentinel://localhost/registry.json', '/registry.json'];
+  for (const url of candidates) {
+    try {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) continue;
+      const json = await response.json();
+      if (json && typeof json === 'object' && json.sysdata) {
+        return json;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+function dispatchRegistryToEditorPreview(iframe, snapshot) {
+  if (!iframe || !snapshot || !snapshot.sysdata) return;
+
+  try {
+    const win = iframe.contentWindow;
+    if (!win || !win.Sentinel || typeof win.Sentinel._handleMessage !== 'function') return;
+
+    win.Sentinel._handleMessage({
+      type: 'native_registry',
+      sysdata: snapshot.sysdata,
+      appdata: snapshot.appdata || {}
+    });
+
+    const level = Number(
+      snapshot && snapshot.sysdata && snapshot.sysdata.audio
+      && snapshot.sysdata.audio.output_device
+      && snapshot.sysdata.audio.output_device.levels
+      && snapshot.sysdata.audio.output_device.levels.smoothed_peak
+    );
+    if (Number.isFinite(level)) {
+      win.Sentinel._handleMessage({
+        type: 'native_audio',
+        level: Math.max(0, Math.min(1, level))
+      });
+    }
+  } catch (_) {}
+}
+
+function stopEditorPreviewDataSync() {
+  if (editorPreviewState.dataTimer != null) {
+    window.clearInterval(editorPreviewState.dataTimer);
+    editorPreviewState.dataTimer = null;
+  }
+  editorPreviewState.inFlight = false;
+  editorPreviewState.lastRegistryHash = '';
+}
+
+function startEditorPreviewDataSync(iframe) {
+  stopEditorPreviewDataSync();
+  if (!iframe) return;
+
+  const pushOnce = async () => {
+    if (editorPreviewState.inFlight) return;
+    editorPreviewState.inFlight = true;
+    try {
+      const snapshot = getParentRegistrySnapshot() || await fetchRegistrySnapshotFromHost();
+      if (!snapshot || !snapshot.sysdata) return;
+
+      const hash = JSON.stringify(snapshot.sysdata) + '|' + JSON.stringify(snapshot.appdata || {});
+      if (hash === editorPreviewState.lastRegistryHash) return;
+      editorPreviewState.lastRegistryHash = hash;
+
+      dispatchRegistryToEditorPreview(iframe, snapshot);
+    } finally {
+      editorPreviewState.inFlight = false;
+    }
+  };
+
+  void pushOnce();
+  editorPreviewState.dataTimer = window.setInterval(() => {
+    void pushOnce();
+  }, PREVIEW_DATA_POLL_MS);
 }
 
 function loadDiscover() {
@@ -1143,10 +1320,13 @@ function loadSettings() {
   function tog(value) { return value ? 'checked' : ''; }
   function sel(current, value) { return current === value ? ' selected' : ''; }
 
-  function buildToggle(name, desc, checked, configPath) {
+  function buildToggle(name, desc, checked, configPath, onValue = null, offValue = null) {
+    const valueAttrs = (onValue !== null && offValue !== null)
+      ? ` data-on-value="${escapeHtml(String(onValue))}" data-off-value="${escapeHtml(String(offValue))}"`
+      : '';
     return `<div class="setting-item" data-config-path="${escapeHtml(configPath)}" data-control="toggle">
       <div class="setting-info"><span class="setting-name">${escapeHtml(name)}</span><span class="setting-description">${escapeHtml(desc)}</span></div>
-      <label class="toggle-switch"><input type="checkbox" ${checked}><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+      <label class="toggle-switch"><input type="checkbox" ${checked}${valueAttrs}><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
     </div>`;
   }
 
@@ -1185,6 +1365,9 @@ function loadSettings() {
   const pauseMax    = d.pause_maximized || 'off';
   const pauseFS     = d.pause_fullscreen || 'off';
   const pauseBat    = d.pause_battery || 'all-monitors';
+  const pauseBatEnabled = pauseBat !== 'off';
+  const pauseIdleMs = d.pause_idle_timeout_ms ?? 0;
+  const pauseIdleMinutes = pauseIdleMs / 60000;
   const pauseChkMs  = d.pause_check_interval_ms ?? 100;
 
   const sendMove    = d.interactions_send_move ?? true;
@@ -1209,7 +1392,7 @@ function loadSettings() {
   const addonVersion= d.addon_version || '1.0.0';
   const backendVersion = d.backend_version || '0.0.0';
 
-  const pauseOpts = [['off','Off'],['current-monitor','Current Monitor'],['all-monitors','All Monitors']];
+  const pauseOpts = [['off','Off'],['per-monitor','Per Monitor'],['all-monitors','All Monitors']];
 
   root.innerHTML = `
     <!-- ═══ General ═══ -->
@@ -1236,7 +1419,8 @@ function loadSettings() {
         ${buildSelect('Pause on Focus Loss', 'Pause wallpapers when the desktop loses focus', pauseFocus, pauseOpts, 'settings.performance.pausing.focus')}
         ${buildSelect('Pause on Maximized', 'Pause wallpapers when a window is maximized', pauseMax, pauseOpts, 'settings.performance.pausing.maximized')}
         ${buildSelect('Pause on Fullscreen', 'Pause wallpapers when a fullscreen application is detected', pauseFS, pauseOpts, 'settings.performance.pausing.fullscreen')}
-        ${buildSelect('Pause on Battery', 'Pause wallpapers when running on battery power', pauseBat, pauseOpts, 'settings.performance.pausing.battery')}
+        ${buildNumber('Pause on Idle Timeout', 'Pause all wallpapers after this many minutes of no user input (0 disables)', pauseIdleMinutes, 'min', 'settings.performance.pausing.idle_timeout_ms')}
+        ${buildToggle('Pause on Battery', 'Pause all wallpapers when running on battery power', tog(pauseBatEnabled), 'settings.performance.pausing.battery', 'all-monitors', 'off')}
         ${buildNumber('Pause Check Interval', 'How often the pause state is evaluated', pauseChkMs, 'ms', 'settings.performance.pausing.check_interval_ms')}
       </div>
     </div>
@@ -1348,7 +1532,13 @@ function loadSettings() {
     const checkbox = item.querySelector('input[type="checkbox"]');
     if (!checkbox) return;
     checkbox.addEventListener('change', () => {
-      postConfigUpdate(configPath, checkbox.checked);
+      const onValue = checkbox.dataset.onValue;
+      const offValue = checkbox.dataset.offValue;
+      if (onValue !== undefined && offValue !== undefined) {
+        postConfigUpdate(configPath, checkbox.checked ? onValue : offValue);
+      } else {
+        postConfigUpdate(configPath, checkbox.checked);
+      }
     });
   });
 
@@ -1375,8 +1565,14 @@ function loadSettings() {
     const input = item.querySelector('input[type="number"]');
     if (!input) return;
     input.addEventListener('change', () => {
-      const val = parseFloat(input.value);
-      if (!isNaN(val)) scheduleSave(configPath, val);
+      let val = parseFloat(input.value);
+      if (isNaN(val)) return;
+
+      if (configPath === 'settings.performance.pausing.idle_timeout_ms') {
+        val = Math.max(0, Math.round(val * 60000));
+      }
+
+      scheduleSave(configPath, val);
     });
   });
 
@@ -1415,6 +1611,7 @@ window.addEventListener('message', (event) => {
     if (document.getElementById('library-root')) {
       renderMonitorLayout(document.getElementById('library-root'));
     }
+    scheduleEditorPreviewLayout();
   }
 });
 
@@ -1433,6 +1630,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (document.getElementById('library-root')) {
         loadLibrary();
       }
+      scheduleEditorPreviewLayout();
     });
   });
 });

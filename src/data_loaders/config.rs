@@ -32,6 +32,8 @@ pub struct PausingSettings {
     pub focus: PauseMode,
     pub maximized: PauseMode,
     pub fullscreen: PauseMode,
+    pub battery: PauseMode,
+    pub idle_timeout_ms: u64,
     pub check_interval_ms: u64,
 }
 
@@ -88,6 +90,7 @@ pub struct WallpaperConfig {
     pub pause_focus_mode: PauseMode,
     pub pause_maximized_mode: PauseMode,
     pub pause_fullscreen_mode: PauseMode,
+    pub pause_battery_mode: PauseMode,
 }
 
 impl Default for AddonSettings {
@@ -118,6 +121,8 @@ impl Default for PausingSettings {
             focus: PauseMode::Off,
             maximized: PauseMode::Off,
             fullscreen: PauseMode::Off,
+            battery: PauseMode::Off,
+            idle_timeout_ms: 0,
             check_interval_ms: 500,
         }
     }
@@ -147,11 +152,11 @@ impl Default for AudioSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            sample_interval_ms: 100,
-            endpoint_refresh_ms: 1200,
+            sample_interval_ms: 25,
+            endpoint_refresh_ms: 800,
             retry_interval_ms: 2000,
-            change_threshold: 0.015,
-            quantize_decimals: 2,
+            change_threshold: 0.003,
+            quantize_decimals: 3,
         }
     }
 }
@@ -315,6 +320,10 @@ fn parse_wallpaper_section(
         .or(legacy_fullscreen)
         .unwrap_or(settings.performance.pausing.fullscreen);
 
+    let pause_battery_mode = pause_mode_at(section_map, "pause_battery")
+        .or_else(|| pause_mode_in_pausing(section_map, "battery"))
+        .unwrap_or(settings.performance.pausing.battery);
+
     if bool_at(section_map, "pause_fullscreen_all_monitors").unwrap_or(false) {
         pause_fullscreen_mode = PauseMode::AllMonitors;
     }
@@ -329,6 +338,7 @@ fn parse_wallpaper_section(
         pause_focus_mode,
         pause_maximized_mode,
         pause_fullscreen_mode,
+        pause_battery_mode,
     })
 }
 
@@ -352,6 +362,13 @@ fn parse_settings(root: &Mapping) -> AddonSettings {
                 .unwrap_or(settings.performance.pausing.maximized);
             settings.performance.pausing.fullscreen = pause_mode_at(pausing, "fullscreen")
                 .unwrap_or(settings.performance.pausing.fullscreen);
+            settings.performance.pausing.battery = pause_mode_at(pausing, "battery")
+                .unwrap_or(settings.performance.pausing.battery);
+            settings.performance.pausing.idle_timeout_ms = u64_any(
+                pausing,
+                &["idle_timeout_ms", "idle_pause_ms", "pause_on_idle_ms", "idle_ms"],
+            )
+            .unwrap_or(settings.performance.pausing.idle_timeout_ms);
             settings.performance.pausing.check_interval_ms = u64_at(pausing, "check_interval_ms")
                 .unwrap_or(settings.performance.pausing.check_interval_ms)
                 .max(100);

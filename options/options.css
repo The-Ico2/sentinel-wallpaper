@@ -737,7 +737,7 @@ input[type="checkbox"] {
 /* ===== Editor Page ===== */
 .editor-layout {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: 1fr;
   gap: 24px;
   min-height: 0;
 }
@@ -765,8 +765,19 @@ input[type="checkbox"] {
   width: 100%;
   height: 100%;
   border: none;
+  display: block;
+}
+
+.editor-preview-stage {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: 0 0;
+  border-radius: calc(var(--radius-lg) - 2px);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 14px 32px rgba(0,0,0,0.45);
 }
 
 .editor-preview-canvas img {
@@ -791,6 +802,14 @@ input[type="checkbox"] {
   gap: 20px;
   overflow-y: auto;
   max-height: calc(100vh - 120px);
+}
+
+@media (min-width: 1280px) {
+  .editor-properties {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(320px, 1fr));
+    align-content: start;
+  }
 }
 
 .property-group {
@@ -1375,12 +1394,10 @@ input[type="checkbox"] {
 
 /* ===== Responsive ===== */
 @media (max-width: 1200px) {
-  .editor-layout { grid-template-columns: 1fr 280px; }
   .discover-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 900px) {
-  .editor-layout { grid-template-columns: 1fr; }
   .discover-grid { grid-template-columns: repeat(2, 1fr); }
 }
 

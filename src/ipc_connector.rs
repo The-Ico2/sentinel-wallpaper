@@ -1,17 +1,15 @@
 // ~/Sentinel/sentinel-addons/wallpaper/src/ipc_connector.rs
 
-use serde::{Deserialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::thread;
 use std::time::Duration;
 use windows::{
     core::HRESULT,
-    core::{
-        PCWSTR,
-    },
+    core::PCWSTR,
     Win32::{
         System::Pipes::WaitNamedPipeW,
-        Foundation::{HANDLE, INVALID_HANDLE_VALUE, CloseHandle, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_PIPE_BUSY},
+        Foundation::{HANDLE, INVALID_HANDLE_VALUE, CloseHandle, ERROR_BROKEN_PIPE, ERROR_MORE_DATA, ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_NOT_CONNECTED},
         Storage::FileSystem::{
             CreateFileW, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
             FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -37,20 +35,17 @@ fn is_win32_error(err: &windows::core::Error, win32_code: u32) -> bool {
     err.code() == HRESULT::from_win32(win32_code)
 }
 
-/// Sends a JSON IPC request to the Sentinel IPC server and returns the universal IpcResponse.
-fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
-    unsafe {
-        let name = to_wstring(r"\\.\pipe\sentinel");
-        let pipe_name = PCWSTR(name.as_ptr());
+/// Open the named pipe, retrying briefly on PIPE_BUSY.
+/// Returns None if the pipe doesn't exist or can't be opened.
+unsafe fn open_pipe(quick: bool) -> Option<HANDLE> {
+    let name = to_wstring(r"\\.\pipe\sentinel");
+    let pipe_name = PCWSTR(name.as_ptr());
 
-        // Wait for server
-        if !WaitNamedPipeW(pipe_name, 5000).as_bool() {
-            info!("[{}][IPC] WaitNamedPipe failed or timed out", DEBUG_NAME);
-            return None;
-        }
+    // Try up to `attempts` times with a short WaitNamedPipe in between.
+    let attempts: u32 = if quick { 3 } else { 6 };
 
-        // Open pipe
-        let handle: HANDLE = match CreateFileW(
+    for attempt in 0..attempts {
+        let result = CreateFileW(
             pipe_name,
             (FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0) as u32,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -58,44 +53,66 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
             OPEN_EXISTING,
             Default::default(),
             None,
-        ) {
-            Ok(h) => h,
+        );
+
+        match result {
+            Ok(h) if h != INVALID_HANDLE_VALUE => return Some(h),
+            Ok(h) => {
+                // INVALID_HANDLE_VALUE — treat as failure
+                warn!("[{}][IPC] CreateFileW returned INVALID_HANDLE_VALUE", DEBUG_NAME);
+                let _ = CloseHandle(h);
+            }
+            Err(e) if is_win32_error(&e, ERROR_PIPE_BUSY.0) => {
+                // All server instances are currently in use — wait briefly
+                // for one to become free, then retry.
+                let wait_ms = if quick { 500 } else { 2000 };
+                info!("[{}][IPC] Pipe busy (attempt {}/{}), waiting {}ms",
+                    DEBUG_NAME, attempt + 1, attempts, wait_ms);
+                let _ = WaitNamedPipeW(pipe_name, wait_ms);
+                continue;
+            }
             Err(e) => {
-                if is_win32_error(&e, ERROR_PIPE_BUSY.0) {
-                    info!("[{}][IPC] Pipe busy; skipping IPC request", DEBUG_NAME);
-                } else {
-                    info!("[{}][IPC] Failed to open pipe: {:?}", DEBUG_NAME, e);
+                // Any other error (pipe doesn't exist, access denied, etc.)
+                if attempt == 0 {
+                    warn!("[{}][IPC] Failed to open pipe: {:?}", DEBUG_NAME, e);
                 }
                 return None;
             }
-        };
-
-        if handle == INVALID_HANDLE_VALUE {
-            error!("[{}][IPC] Invalid handle returned from CreateFileW", DEBUG_NAME);
-            return None;
         }
+    }
+
+    warn!("[{}][IPC] Pipe busy after {} attempts", DEBUG_NAME, attempts);
+    None
+}
+
+/// Sends a JSON IPC request to the Sentinel IPC server and returns the universal IpcResponse.
+fn send_ipc_request_once(req: &Value, quick: bool) -> Option<IpcResponse> {
+    unsafe {
+        let handle = open_pipe(quick)?;
 
         // Serialize request
         let req_bytes = match serde_json::to_vec(req) {
             Ok(b) => b,
             Err(e) => {
                 error!("[{}][IPC] Failed to serialize request JSON: {:?}", DEBUG_NAME, e);
-                if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
+                let _ = CloseHandle(handle);
                 return None;
             }
         };
+
         // Write request
         let mut written: u32 = 0;
         if let Err(e) = WriteFile(handle, Some(&req_bytes), Some(&mut written), None) {
             if is_win32_error(&e, ERROR_BROKEN_PIPE.0) {
-                info!("[{}][IPC] Pipe closed while writing request", DEBUG_NAME);
+                warn!("[{}][IPC] Pipe closed while writing request", DEBUG_NAME);
             } else {
-                info!("[{}][IPC] Failed to write to pipe: {:?}", DEBUG_NAME, e);
+                warn!("[{}][IPC] Failed to write to pipe: {:?}", DEBUG_NAME, e);
             }
-            if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
+            let _ = CloseHandle(handle);
             return None;
         }
 
+        // Read response
         let mut response = Vec::<u8>::new();
         loop {
             let mut chunk: Vec<u8> = vec![0u8; 64 * 1024];
@@ -107,7 +124,6 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
                         break;
                     }
                     response.extend_from_slice(&chunk[..read as usize]);
-                    // Keep reading — there may be more data in the pipe
                 }
                 Err(e) => {
                     if read > 0 {
@@ -120,21 +136,24 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
 
                     // Broken pipe after accumulating data means the server
                     // closed its end — treat whatever we have as the full response.
-                    if is_win32_error(&e, ERROR_BROKEN_PIPE.0) {
+                    if is_win32_error(&e, ERROR_BROKEN_PIPE.0)
+                        || is_win32_error(&e, ERROR_PIPE_NOT_CONNECTED.0)
+                        || is_win32_error(&e, ERROR_NO_DATA.0)
+                    {
                         break;
                     }
 
-                    info!("[{}][IPC] Failed to read from pipe: {:?}", DEBUG_NAME, e);
-                    if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
+                    warn!("[{}][IPC] Failed to read from pipe: {:?}", DEBUG_NAME, e);
+                    let _ = CloseHandle(handle);
                     return None;
                 }
             }
         }
 
-        // Close handle
-        if let Err(e2) = CloseHandle(handle) { warn!("[{}][IPC] CloseHandle failed: {:?}", DEBUG_NAME, e2); }
+        let _ = CloseHandle(handle);
 
         if response.is_empty() {
+            warn!("[{}][IPC] Empty response from server", DEBUG_NAME);
             return None;
         }
 
@@ -150,7 +169,7 @@ fn send_ipc_request_once(req: &Value) -> Option<IpcResponse> {
 }
 
 pub fn request(ns: &str, cmd: &str, args: Option<serde_json::Value>) -> Option<String> {
-    info!("[{}][IPC] Sending request: ns={}, cmd={}", DEBUG_NAME, ns, cmd);
+    warn!("[{}][IPC] Sending request: ns={}, cmd={}", DEBUG_NAME, ns, cmd);
 
     let req = serde_json::json!({
         "ns": ns,
@@ -161,18 +180,17 @@ pub fn request(ns: &str, cmd: &str, args: Option<serde_json::Value>) -> Option<S
     if let Some(resp) = send_ipc_request(&req) {
         if resp.ok {
             if let Some(data) = resp.data {
-                // Return the response data as JSON string
                 return Some(data.to_string());
             } else {
-                info!("[{}][IPC] No data field in response", DEBUG_NAME);
+                warn!("[{}][IPC] No data field in response", DEBUG_NAME);
                 return None;
             }
         } else {
-            info!("[{}][IPC] Error in response: {:?}", DEBUG_NAME, resp.error);
+            warn!("[{}][IPC] Error in response: {:?}", DEBUG_NAME, resp.error);
             return None;
         }
     } else {
-        info!("[{}][IPC] No IPC response received", DEBUG_NAME);
+        warn!("[{}][IPC] No IPC response received", DEBUG_NAME);
         return None;
     }
 }
@@ -187,7 +205,7 @@ pub fn request_quick(ns: &str, cmd: &str, args: Option<serde_json::Value>) -> Op
         "args": args
     });
 
-    if let Some(resp) = send_ipc_request_once(&req) {
+    if let Some(resp) = send_ipc_request_once(&req, true) {
         if resp.ok {
             if let Some(data) = resp.data {
                 return Some(data.to_string());
@@ -199,15 +217,15 @@ pub fn request_quick(ns: &str, cmd: &str, args: Option<serde_json::Value>) -> Op
 }
 
 fn send_ipc_request(req: &Value) -> Option<IpcResponse> {
-    // Retry with increasing backoff: 100, 200, 400, 800, 1600 ms
-    let backoff = [100u64, 200, 400, 800, 1600];
+    // Retry with increasing backoff: 200, 400, 800, 1600, 3200 ms
+    let backoff = [200u64, 400, 800, 1600, 3200];
 
-    if let Some(resp) = send_ipc_request_once(req) {
+    if let Some(resp) = send_ipc_request_once(req, false) {
         return Some(resp);
     }
 
     for (i, delay) in backoff.iter().enumerate() {
-        info!(
+        warn!(
             "[{}][IPC] Retry {}/{} after {}ms",
             DEBUG_NAME,
             i + 1,
@@ -215,7 +233,7 @@ fn send_ipc_request(req: &Value) -> Option<IpcResponse> {
             delay
         );
         thread::sleep(Duration::from_millis(*delay));
-        if let Some(resp) = send_ipc_request_once(req) {
+        if let Some(resp) = send_ipc_request_once(req, false) {
             return Some(resp);
         }
     }

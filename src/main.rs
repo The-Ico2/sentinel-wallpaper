@@ -9,7 +9,9 @@ mod wallpaper_engine;
 mod paths;
 
 use std::{
+	collections::HashMap,
 	fs,
+	path::Path,
 	thread,
 	time::{Duration, Instant, SystemTime},
 };
@@ -52,6 +54,66 @@ fn enable_per_monitor_dpi_awareness() {
 	}
 }
 
+fn should_ignore_asset_reload_path(path: &Path) -> bool {
+	let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+		return false;
+	};
+
+	let lower_name = file_name.to_ascii_lowercase();
+	if lower_name == "manifest.json"
+		|| lower_name.ends_with(".tmp")
+		|| lower_name.ends_with(".temp")
+		|| lower_name.ends_with(".swp")
+		|| lower_name.ends_with(".bak")
+		|| lower_name.starts_with(".~")
+	{
+		return true;
+	}
+
+	let in_preview_dir = path
+		.components()
+		.filter_map(|c| c.as_os_str().to_str())
+		.any(|seg| seg.eq_ignore_ascii_case("preview"));
+
+	if in_preview_dir {
+		return true;
+	}
+
+	false
+}
+
+fn newest_file_modified_recursive(dir: &Path) -> Option<SystemTime> {
+	let mut newest: Option<SystemTime> = None;
+	let entries = fs::read_dir(dir).ok()?;
+
+	for entry in entries.flatten() {
+		let path = entry.path();
+		if path.is_dir() {
+			if let Some(child_newest) = newest_file_modified_recursive(&path) {
+				newest = match newest {
+					Some(current) if current >= child_newest => Some(current),
+					_ => Some(child_newest),
+				};
+			}
+		} else {
+			if should_ignore_asset_reload_path(&path) {
+				continue;
+			}
+
+			let Ok(modified) = fs::metadata(&path).and_then(|m| m.modified()) else {
+				continue;
+			};
+
+			newest = match newest {
+				Some(current) if current >= modified => Some(current),
+				_ => Some(modified),
+			};
+		}
+	}
+
+	newest
+}
+
 fn main() -> windows::core::Result<()> {
 	logging::init(true, "info");
 	bootstrap::bootstrap_addon();
@@ -74,6 +136,9 @@ fn main() -> windows::core::Result<()> {
 
 	let mut runtime = WallpaperRuntime::new();
 	runtime.apply(&config);
+	if runtime.has_registry_snapshot() {
+		let _ = runtime.sync_pause_state_now(false);
+	}
 	let mut loop_sleep = Duration::from_millis(config.settings.runtime.tick_sleep_ms.max(1));
 	let mut watcher_enabled = config.settings.performance.watcher.enabled;
 	let mut watcher_interval =
@@ -82,6 +147,13 @@ fn main() -> windows::core::Result<()> {
 	let mut last_config_modified: Option<SystemTime> = fs::metadata(&config_path)
 		.and_then(|m| m.modified())
 		.ok();
+	let mut watched_asset_mtime: HashMap<std::path::PathBuf, SystemTime> = runtime
+		.active_asset_dirs()
+		.into_iter()
+		.filter_map(|dir| newest_file_modified_recursive(&dir).map(|mtime| (dir, mtime)))
+		.collect();
+	let mut pending_asset_reload_since: HashMap<std::path::PathBuf, Instant> = HashMap::new();
+	let watcher_debounce = Duration::from_millis(400);
 
 	loop {
 		unsafe {
@@ -97,7 +169,11 @@ fn main() -> windows::core::Result<()> {
 
 		let unpaused_transition = runtime.tick_interactions();
 		if unpaused_transition && config.settings.runtime.reapply_on_pause_change {
+			let all_paused_before = runtime.hosted_all_paused();
 			runtime.apply(&config);
+			if runtime.has_registry_snapshot() {
+				let _ = runtime.sync_pause_state_now(all_paused_before);
+			}
 			warn!("[{}][PAUSE] Reapplied runtime after unpause transition", DEBUG_NAME);
 		}
 
@@ -117,8 +193,12 @@ fn main() -> windows::core::Result<()> {
 			if changed {
 				match AddonConfig::load(&config_path) {
 					Some(new_config) => {
+						let all_paused_before = runtime.hosted_all_paused();
 						config = new_config;
 						runtime.apply(&config);
+						if runtime.has_registry_snapshot() {
+							let _ = runtime.sync_pause_state_now(all_paused_before);
+						}
 						loop_sleep = Duration::from_millis(config.settings.runtime.tick_sleep_ms.max(1));
 						watcher_enabled = config.settings.performance.watcher.enabled;
 						watcher_interval = Duration::from_millis(
@@ -131,6 +211,11 @@ fn main() -> windows::core::Result<()> {
 								config_path.display()
 							);
 						}
+						watched_asset_mtime = runtime
+							.active_asset_dirs()
+							.into_iter()
+							.filter_map(|dir| newest_file_modified_recursive(&dir).map(|mtime| (dir, mtime)))
+							.collect();
 					}
 					None => {
 						warn!(
@@ -142,6 +227,43 @@ fn main() -> windows::core::Result<()> {
 				}
 
 				last_config_modified = current_modified;
+			}
+
+			let active_dirs = runtime.active_asset_dirs();
+			let active_set: std::collections::HashSet<_> = active_dirs.iter().cloned().collect();
+			watched_asset_mtime.retain(|dir, _| active_set.contains(dir));
+			pending_asset_reload_since.retain(|dir, _| active_set.contains(dir));
+
+			for dir in active_dirs {
+				let Some(current_modified) = newest_file_modified_recursive(&dir) else {
+					continue;
+				};
+
+				let changed = match watched_asset_mtime.get(&dir) {
+					Some(prev) => current_modified > *prev,
+					None => false,
+				};
+
+				if changed {
+					pending_asset_reload_since.insert(dir.clone(), Instant::now());
+				}
+
+				if let Some(since) = pending_asset_reload_since.get(&dir).copied() {
+					if since.elapsed() >= watcher_debounce {
+						let reloaded = runtime.reload_wallpapers_for_asset_dir(&dir);
+						if reloaded > 0 && config.settings.diagnostics.log_watcher_reloads {
+							warn!(
+								"[{}][WATCHER] Debounced reload: {} hosted wallpaper instance(s) for asset dir {}",
+								DEBUG_NAME,
+								reloaded,
+								dir.display()
+							);
+						}
+						pending_asset_reload_since.remove(&dir);
+					}
+				}
+
+				watched_asset_mtime.insert(dir, current_modified);
 			}
 		}
 

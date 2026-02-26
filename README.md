@@ -107,6 +107,7 @@ settings:
       focus: "per-monitor"        # off | per-monitor | all-monitors
       maximized: "per-monitor"
       fullscreen: "all-monitors"
+      idle_timeout_ms: 0            # pause all wallpapers after idle timeout (0 disables)
       check_interval_ms: 500
     watcher:
       enabled: true
@@ -139,7 +140,7 @@ settings:
 
 ## Pause Behavior
 
-When a window is focused, maximized, or fullscreen (depending on config), the addon:
+When a window is focused, maximized, fullscreen, or the system exceeds `idle_timeout_ms` (depending on config), the addon:
 
 1. Captures the current wallpaper frame from each hosted WebView2 window
 2. Stitches per-monitor captures into a single bitmap

@@ -1,60 +1,22 @@
 {
   "editable": {
     "accentSettings": {
-      "accentBlue": {
-        "max": 255,
-        "min": 0,
-        "selector": "slider",
-        "step": 1,
-        "value": 0,
-        "variable": "--accent-b"
+      "name": "Accent Colors",
+      "description": "Tune the accent and ember glow colors",
+      "accent": {
+        "selector": "color-picker",
+        "value": "#C83228",
+        "variable": "--accent"
       },
-      "accentGreen": {
-        "max": 255,
-        "min": 0,
-        "selector": "slider",
-        "step": 1,
-        "value": 0,
-        "variable": "--accent-g"
-      },
-      "accentRed": {
-        "max": 255,
-        "min": 0,
-        "selector": "slider",
-        "step": 1,
-        "value": 255,
-        "variable": "--accent-r"
-      },
-      "description": "Tune the accent and ember glow colors (RGB channels).",
-      "emberBlue": {
-        "max": 255,
-        "min": 0,
-        "selector": "slider",
-        "step": 1,
-        "value": 255,
-        "variable": "--ember-b"
-      },
-      "emberGreen": {
-        "max": 255,
-        "min": 0,
-        "selector": "slider",
-        "step": 1,
-        "value": 255,
-        "variable": "--ember-g"
-      },
-      "emberRed": {
-        "max": 255,
-        "min": 0,
-        "selector": "slider",
-        "step": 1,
-        "value": 255,
-        "variable": "--ember-r"
-      },
-      "name": "Accent Colors"
+      "ember": {
+        "selector": "color-picker",
+        "value": "#FFAA3C",
+        "variable": "--ember"
+      }
     },
     "background": {
       "selector": "color-picker",
-      "value": "#ffffffFF",
+      "value": "#ffffff",
       "variable": "--bg-color"
     },
     "fontSettings": {
@@ -74,6 +36,197 @@
       },
       "name": "Font Settings"
     },
+    "layoutSettings": {
+      "name": "Layout",
+      "description": "Adjust HUD spacing and column widths.",
+      "leftColumnWidth": {
+        "selector": "slider",
+        "min": 220,
+        "max": 520,
+        "step": 10,
+        "value": 300,
+        "variable": "--left-col-width"
+      },
+      "rightColumnWidth": {
+        "selector": "slider",
+        "min": 220,
+        "max": 520,
+        "step": 10,
+        "value": 300,
+        "variable": "--right-col-width"
+      },
+      "hudPadding": {
+        "selector": "slider",
+        "min": 0,
+        "max": 28,
+        "step": 1,
+        "value": 10,
+        "variable": "--hud-padding"
+      },
+      "panelGap": {
+        "selector": "slider",
+        "min": 2,
+        "max": 20,
+        "step": 1,
+        "value": 6,
+        "variable": "--panel-gap"
+      },
+      "uiScaleMultiplier": {
+        "selector": "slider",
+        "min": 0.2,
+        "max": 2,
+        "step": 0.05,
+        "value": 1,
+        "variable": "--ui-scale-multiplier"
+      }
+    },
+    "panelStyle": {
+      "name": "Panel Style",
+      "description": "Tweak panel blur, radius, and border intensity.",
+      "panelRadius": {
+        "selector": "slider",
+        "min": 0,
+        "max": 24,
+        "step": 1,
+        "value": 10,
+        "variable": "--panel-radius"
+      },
+      "panelPaddingY": {
+        "selector": "slider",
+        "min": 2,
+        "max": 18,
+        "step": 1,
+        "value": 7,
+        "variable": "--panel-padding-y"
+      },
+      "panelPaddingX": {
+        "selector": "slider",
+        "min": 4,
+        "max": 24,
+        "step": 1,
+        "value": 10,
+        "variable": "--panel-padding-x"
+      },
+      "topBlur": {
+        "selector": "slider",
+        "min": 0,
+        "max": 20,
+        "step": 1,
+        "value": 8,
+        "variable": "--top-blur"
+      },
+      "panelBlur": {
+        "selector": "slider",
+        "min": 0,
+        "max": 20,
+        "step": 1,
+        "value": 2,
+        "variable": "--panel-blur"
+      },
+      "panelBorderOpacity": {
+        "selector": "slider",
+        "min": 0,
+        "max": 1,
+        "step": 0.02,
+        "value": 0.1,
+        "variable": "--panel-border-opacity"
+      },
+      "panelBackgroundOpacity": {
+        "selector": "slider",
+        "min": 0,
+        "max": 1,
+        "step": 0.02,
+        "value": 0.06,
+        "variable": "--panel-bg-opacity"
+      },
+      "vizMinHeight": {
+        "selector": "slider",
+        "min": 80,
+        "max": 300,
+        "step": 5,
+        "value": 100,
+        "variable": "--viz-min-height"
+      }
+    },
+    "effects": {
+      "name": "Effects",
+      "description": "Control some animation presentation details.",
+      "latticeSpacing": {
+        "selector": "slider",
+        "min": 40,
+        "max": 180,
+        "step": 2,
+        "value": 80,
+        "variable": "--lattice-spacing"
+      }
+    },
+    "panelLayout": {
+      "name": "Panel Layout",
+      "description": "Move panels between columns, reorder them, or hide them.",
+      "cpuVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-cpu-visible" },
+      "cpuColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 1, "variable": "--panel-cpu-column" },
+      "cpuOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 1, "variable": "--panel-cpu-order" },
+
+      "gpuVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-gpu-visible" },
+      "gpuColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 1, "variable": "--panel-gpu-column" },
+      "gpuOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 2, "variable": "--panel-gpu-order" },
+
+      "ramVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-ram-visible" },
+      "ramColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 1, "variable": "--panel-ram-column" },
+      "ramOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 3, "variable": "--panel-ram-order" },
+
+      "storageVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-storage-visible" },
+      "storageColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 1, "variable": "--panel-storage-column" },
+      "storageOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 4, "variable": "--panel-storage-order" },
+
+      "networkVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-network-visible" },
+      "networkColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 1, "variable": "--panel-network-column" },
+      "networkOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 5, "variable": "--panel-network-order" },
+
+      "powerVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-power-visible" },
+      "powerColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 1, "variable": "--panel-power-column" },
+      "powerOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 6, "variable": "--panel-power-order" },
+
+      "systemVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-system-visible" },
+      "systemColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 1, "variable": "--panel-system-column" },
+      "systemOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 7, "variable": "--panel-system-order" },
+
+      "eventVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-event-visible" },
+      "eventColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-event-column" },
+      "eventOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 1, "variable": "--panel-event-order" },
+
+      "interactionsVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-interactions-visible" },
+      "interactionsColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-interactions-column" },
+      "interactionsOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 2, "variable": "--panel-interactions-order" },
+
+      "keysVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-keys-visible" },
+      "keysColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-keys-column" },
+      "keysOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 3, "variable": "--panel-keys-order" },
+
+      "audioVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-audio-visible" },
+      "audioColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-audio-column" },
+      "audioOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 4, "variable": "--panel-audio-order" },
+
+      "wifiVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-wifi-visible" },
+      "wifiColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-wifi-column" },
+      "wifiOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 5, "variable": "--panel-wifi-order" },
+
+      "bluetoothVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-bluetooth-visible" },
+      "bluetoothColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-bluetooth-column" },
+      "bluetoothOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 6, "variable": "--panel-bluetooth-order" },
+
+      "displaysVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-displays-visible" },
+      "displaysColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-displays-column" },
+      "displaysOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 7, "variable": "--panel-displays-order" },
+
+      "mediaVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-media-visible" },
+      "mediaColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-media-column" },
+      "mediaOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 8, "variable": "--panel-media-order" },
+
+      "vizVisible": { "selector": "slider", "min": 0, "max": 1, "step": 1, "value": 1, "variable": "--panel-viz-visible" },
+      "vizColumn": { "selector": "slider", "min": 1, "max": 2, "step": 1, "value": 2, "variable": "--panel-viz-column" },
+      "vizOrder": { "selector": "slider", "min": 1, "max": 16, "step": 1, "value": 9, "variable": "--panel-viz-order" }
+    },
     "hudOpacity": {
       "max": 1,
       "min": 0,
@@ -84,7 +237,7 @@
     },
     "textColor": {
       "selector": "color-picker",
-      "value": "#ffffffFF",
+      "value": "#ffffff",
       "variable": "--text-color"
     }
   },
