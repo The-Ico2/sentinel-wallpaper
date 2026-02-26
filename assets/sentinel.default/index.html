@@ -753,24 +753,58 @@ function updateAudioStats(a) {
 /* ─── Power panel ─── */
 function updatePower(p) {
   const el = document.getElementById('powerInfo');
-  const hasBattery = p.has_battery === true;
-  const pct_val = p.battery_percent != null ? p.battery_percent : null;
-  const status = p.power_status || p.ac_status || '—';
-  const saver = p.battery_saver === true;
-  let html = `<div class="row"><span class="lbl">AC / Battery</span><span class="val">${status}</span></div>`;
-  if (hasBattery && pct_val != null) {
-    html += `<div class="row"><span class="lbl">Battery</span><span class="val">${pct_val}%</span></div>`;
+  const battery = (p && typeof p.battery === 'object') ? p.battery : null;
+  const batteryDetails = (battery && typeof battery.details === 'object') ? battery.details : null;
+
+  const pctRaw = p.battery_percent != null
+    ? p.battery_percent
+    : (battery && battery.percent != null
+      ? battery.percent
+      : (batteryDetails && batteryDetails.estimated_charge_percent != null
+        ? batteryDetails.estimated_charge_percent
+        : null));
+  const pct_val = Number.isFinite(Number(pctRaw)) ? Math.max(0, Math.min(100, Number(pctRaw))) : null;
+
+  const hasBattery = p.has_battery === true
+    || (battery && battery.present === true)
+    || pct_val != null;
+
+  const rawStatus = String(p.power_status || p.ac_status || '').toLowerCase();
+  const charging = (battery && battery.charging === true) || rawStatus === 'charging';
+  const onAcPower = rawStatus === 'online'
+    || rawStatus === 'ac'
+    || rawStatus === 'plugged'
+    || rawStatus === 'plugged_in'
+    || charging;
+  const status = onAcPower ? 'AC Power' : (hasBattery ? 'Battery' : '—');
+  const powerPlan = p.power_plan || p.plan || '—';
+  const saver = p.battery_saver === true || (battery && battery.saver_active === true);
+
+  const estimatedRuntimeMinutes = batteryDetails && Number.isFinite(Number(batteryDetails.estimated_runtime_minutes))
+    ? Number(batteryDetails.estimated_runtime_minutes)
+    : null;
+  const estimatedRuntimeSeconds = estimatedRuntimeMinutes != null && estimatedRuntimeMinutes < 1_000_000
+    ? Math.floor(estimatedRuntimeMinutes * 60)
+    : null;
+  const remainingSeconds = Number.isFinite(Number(p.remaining_seconds))
+    ? Number(p.remaining_seconds)
+    : (Number.isFinite(Number(battery && battery.lifetime_seconds))
+      ? Number(battery.lifetime_seconds)
+      : estimatedRuntimeSeconds);
+
+  let html = '';
+  if (pct_val != null) {
+    html += `<div class="row"><span class="lbl">Battery</span><span class="val">${pct_val.toFixed(0)}%</span></div>`;
     html += barHTML(pct_val, 100, 'rgba(100,200,120,.8)');
-    if (p.remaining_seconds != null && p.remaining_seconds > 0) {
-      const mins = Math.floor(p.remaining_seconds / 60);
-      const hrs = Math.floor(mins / 60);
-      const m = mins % 60;
-      html += `<div class="row"><span class="lbl">Remaining</span><span class="val">${hrs}h ${m}m</span></div>`;
-    }
-    if (saver) html += `<div class="row"><span class="lbl">Battery Saver</span><span class="val">On</span></div>`;
+  } else if (hasBattery) {
+    html += `<div class="row"><span class="lbl">Battery</span><span class="val">Unknown</span></div>`;
   } else {
     html += `<div class="row"><span class="lbl">Battery</span><span class="val">N/A</span></div>`;
   }
+
+  html += `<div class="row"><span class="lbl">Status</span><span class="val">${status}</span></div>`;
+  html += `<div class="row"><span class="lbl">Battery Saver</span><span class="val">${saver ? 'On' : 'Off'}</span></div>`;
+  html += `<div class="row"><span class="lbl">Power Plan</span><span class="val">${powerPlan}</span></div>`;
   el.innerHTML = html;
 }
 
@@ -945,7 +979,7 @@ function updateProcesses(p) {
 
 const mediaSessionState = {
   snapshot: null,
-  receivedAtMs: 0,
+  receivedAtPerfMs: 0,
   basePositionMs: 0,
   displayedPositionMs: 0,
   sessionKey: ''
@@ -961,6 +995,24 @@ function mediaSessionKey(ms) {
     ms.album || '',
     ms.track_number || '',
     timeline.duration_ms || ''
+  ].join('|');
+}
+
+function mediaSessionSnapshotKey(ms) {
+  if (!ms) return '';
+  const timeline = ms.timeline || {};
+  return [
+    ms.source_app_id || '',
+    ms.title || '',
+    ms.artist || '',
+    ms.album || '',
+    String(ms.playback_status || ''),
+    ms.playing === true ? '1' : '0',
+    Number(timeline.position_ms) || 0,
+    Number(timeline.duration_ms) || 0,
+    Number(timeline.start_ms) || 0,
+    Number(timeline.end_ms) || 0,
+    Number(ms.playback_rate) || 0
   ].join('|');
 }
 
@@ -1003,7 +1055,7 @@ function getRenderedMediaSession() {
   const rate = Number.isFinite(out.playback_rate) && out.playback_rate > 0
     ? out.playback_rate
     : 1;
-  const elapsedMs = Math.max(0, Date.now() - mediaSessionState.receivedAtMs);
+  const elapsedMs = Math.max(0, performance.now() - mediaSessionState.receivedAtPerfMs);
   let positionMs = mediaSessionState.basePositionMs + elapsedMs * rate;
 
   if (Number.isFinite(out.timeline.duration_ms) && out.timeline.duration_ms > 0) {
@@ -1014,7 +1066,7 @@ function getRenderedMediaSession() {
     positionMs = Math.min(positionMs, maxTimelinePos);
   }
 
-  out.timeline.position_ms = Math.max(0, Math.floor(positionMs));
+  out.timeline.position_ms = Math.max(0, positionMs);
   mediaSessionState.displayedPositionMs = out.timeline.position_ms;
   return out;
 }
@@ -1072,7 +1124,7 @@ function updateMediaSession(a) {
 
   mediaSessionState.snapshot = nextMs;
   mediaSessionState.sessionKey = nextKey;
-  mediaSessionState.receivedAtMs = Date.now();
+  mediaSessionState.receivedAtPerfMs = performance.now();
   mediaSessionState.basePositionMs = basePos;
 
   renderMediaSession(getRenderedMediaSession());
@@ -1195,11 +1247,24 @@ Sentinel.on('resume', () => {
   statusPill.textContent = 'running';
 });
 
+let lastPolledMediaSnapshotKey = '';
+
 setInterval(() => {
+  const latestAudio = Sentinel.get('audio');
+  if (latestAudio && Object.prototype.hasOwnProperty.call(latestAudio, 'media_session')) {
+    const snapshotKey = mediaSessionSnapshotKey(latestAudio.media_session);
+    if (snapshotKey !== lastPolledMediaSnapshotKey) {
+      lastPolledMediaSnapshotKey = snapshotKey;
+      updateMediaSession(latestAudio);
+    }
+  } else if (lastPolledMediaSnapshotKey !== '') {
+    lastPolledMediaSnapshotKey = '';
+    updateMediaSession(latestAudio);
+  }
+
   if (!mediaSessionState.snapshot) return;
-  if (!mediaIsAdvancing(mediaSessionState.snapshot)) return;
   renderMediaSession(getRenderedMediaSession());
-}, 250);
+}, 100);
 
 /* ═══════════════ DRAWING ═══════════════ */
 function resize() {
