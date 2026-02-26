@@ -14,6 +14,20 @@
         "variable": "--ember"
       }
     },
+    "sceneColors": {
+      "name": "Scene Colors",
+      "description": "Color the animated scene separately from HUD/panel accents.",
+      "sceneAccent": {
+        "selector": "color-picker",
+        "value": "#C83228",
+        "variable": "--scene-accent"
+      },
+      "sceneEmber": {
+        "selector": "color-picker",
+        "value": "#FFAA3C",
+        "variable": "--scene-ember"
+      }
+    },
     "background": {
       "selector": "color-picker",
       "value": "#ffffff",

@@ -644,6 +644,7 @@ function loadLibrary() {
       localStorage.setItem('wallpaper:selected', w.id);
       assignSelectedWallpaperToCurrentMonitor();
       postAssignmentUpdate(w.id, Array.from(assignmentState.selectedMonitorIds));
+      schedulePreviewCapture(w.id, w.manifest_path || null, card);
       loadLibrary();
     };
     grid.appendChild(card);
@@ -702,6 +703,19 @@ function postCapturePreview(wallpaperId, manifestPath) {
   });
 }
 
+function schedulePreviewCapture(wallpaperId, manifestPath, timerBag) {
+  if (!wallpaperId) return;
+  const bag = timerBag || schedulePreviewCapture;
+  clearTimeout(bag._captureQuickTimer);
+  clearTimeout(bag._captureFollowTimer);
+  bag._captureQuickTimer = setTimeout(() => {
+    postCapturePreview(wallpaperId, manifestPath);
+  }, 450);
+  bag._captureFollowTimer = setTimeout(() => {
+    postCapturePreview(wallpaperId, manifestPath);
+  }, 2600);
+}
+
 function pushCssVarToIframe(iframe, varName, value) {
   if (!iframe) return;
   var directOk = false;
@@ -745,11 +759,7 @@ function buildEditableControl(key, entry, item, iframe) {
     entry.value = newValue;
     if (variable) pushCssVarToIframe(iframe, variable, typeof newValue === 'number' ? String(newValue) : newValue);
     postEditableSave(item.id, key, newValue, item.manifest_path);
-    // Schedule preview capture after a short debounce
-    clearTimeout(onValueChange._captureTimer);
-    onValueChange._captureTimer = setTimeout(() => {
-      postCapturePreview(item.id, item.manifest_path);
-    }, 2000);
+    schedulePreviewCapture(item.id, item.manifest_path, onValueChange);
   }
 
   if (selector === 'color-picker') {

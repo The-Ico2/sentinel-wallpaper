@@ -13,6 +13,8 @@
   --text-color: #ffe4d8;
   --accent: #C83228;
   --ember: #FFAA3C;
+  --scene-accent: #C83228;
+  --scene-ember: #FFAA3C;
   --accent-r: 200;
   --accent-g: 50;
   --accent-b: 40;
@@ -1288,6 +1290,8 @@ function resize() {
 // ── Theme color cache (read from CSS variables once per frame) ──
 let acR = 200, acG = 50, acB = 40;
 let emR = 255, emG = 170, emB = 60;
+let uiAcR = 200, uiAcG = 50, uiAcB = 40;
+let uiEmR = 255, uiEmG = 170, uiEmB = 60;
 let bgR = 10, bgG = 4, bgB = 6;
 let lastAccentCss = '';
 let lastEmberCss = '';
@@ -1326,8 +1330,12 @@ function readThemeVars() {
   const _i = (v, d) => { const n = parseInt(v); return Number.isFinite(n) ? n : d; };
   const accentHex = (s.getPropertyValue('--accent') || '').trim();
   const emberHex = (s.getPropertyValue('--ember') || '').trim();
+  const sceneAccentHex = (s.getPropertyValue('--scene-accent') || '').trim();
+  const sceneEmberHex = (s.getPropertyValue('--scene-ember') || '').trim();
 
-  if (accentHex) {
+  if (sceneAccentHex) {
+    [acR, acG, acB] = _cssColorToRgb(sceneAccentHex, [200, 50, 40]);
+  } else if (accentHex) {
     [acR, acG, acB] = _cssColorToRgb(accentHex, [200, 50, 40]);
   } else {
     acR = _i(s.getPropertyValue('--accent-r'), 200);
@@ -1335,7 +1343,9 @@ function readThemeVars() {
     acB = _i(s.getPropertyValue('--accent-b'), 40);
   }
 
-  if (emberHex) {
+  if (sceneEmberHex) {
+    [emR, emG, emB] = _cssColorToRgb(sceneEmberHex, [255, 170, 60]);
+  } else if (emberHex) {
     [emR, emG, emB] = _cssColorToRgb(emberHex, [255, 170, 60]);
   } else {
     emR = _i(s.getPropertyValue('--ember-r'), 255);
@@ -1343,19 +1353,35 @@ function readThemeVars() {
     emB = _i(s.getPropertyValue('--ember-b'), 60);
   }
 
+  if (accentHex) {
+    [uiAcR, uiAcG, uiAcB] = _cssColorToRgb(accentHex, [200, 50, 40]);
+  } else {
+    uiAcR = _i(s.getPropertyValue('--accent-r'), 200);
+    uiAcG = _i(s.getPropertyValue('--accent-g'), 50);
+    uiAcB = _i(s.getPropertyValue('--accent-b'), 40);
+  }
+
+  if (emberHex) {
+    [uiEmR, uiEmG, uiEmB] = _cssColorToRgb(emberHex, [255, 170, 60]);
+  } else {
+    uiEmR = _i(s.getPropertyValue('--ember-r'), 255);
+    uiEmG = _i(s.getPropertyValue('--ember-g'), 170);
+    uiEmB = _i(s.getPropertyValue('--ember-b'), 60);
+  }
+
   if (accentHex && accentHex !== lastAccentCss) {
     const root = document.documentElement.style;
-    root.setProperty('--accent-r', String(acR));
-    root.setProperty('--accent-g', String(acG));
-    root.setProperty('--accent-b', String(acB));
+    root.setProperty('--accent-r', String(uiAcR));
+    root.setProperty('--accent-g', String(uiAcG));
+    root.setProperty('--accent-b', String(uiAcB));
     lastAccentCss = accentHex;
   }
 
   if (emberHex && emberHex !== lastEmberCss) {
     const root = document.documentElement.style;
-    root.setProperty('--ember-r', String(emR));
-    root.setProperty('--ember-g', String(emG));
-    root.setProperty('--ember-b', String(emB));
+    root.setProperty('--ember-r', String(uiEmR));
+    root.setProperty('--ember-g', String(uiEmG));
+    root.setProperty('--ember-b', String(uiEmB));
     lastEmberCss = emberHex;
   }
 
@@ -2050,7 +2076,13 @@ addEventListener('message', function(event) {
   if (data.type === '__sentinel_set_css_var' && data.variable && data.value != null) {
     document.documentElement.style.setProperty(data.variable, data.value);
     if (data.variable === '--ui-scale-multiplier') resize();
-    if (data.variable === '--bg-color' || data.variable === '--accent' || data.variable === '--ember') readThemeVars();
+    if (
+      data.variable === '--bg-color' ||
+      data.variable === '--accent' ||
+      data.variable === '--ember' ||
+      data.variable === '--scene-accent' ||
+      data.variable === '--scene-ember'
+    ) readThemeVars();
     if (data.variable.indexOf('--panel-') === 0) applyPanelLayout(false);
   }
 });
@@ -2061,7 +2093,9 @@ Sentinel.on('cssvarchange', function(vars) {
   if (
     Object.prototype.hasOwnProperty.call(vars, '--bg-color') ||
     Object.prototype.hasOwnProperty.call(vars, '--accent') ||
-    Object.prototype.hasOwnProperty.call(vars, '--ember')
+    Object.prototype.hasOwnProperty.call(vars, '--ember') ||
+    Object.prototype.hasOwnProperty.call(vars, '--scene-accent') ||
+    Object.prototype.hasOwnProperty.call(vars, '--scene-ember')
   ) {
     readThemeVars();
   }
