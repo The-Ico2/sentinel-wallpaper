@@ -25,6 +25,56 @@ fn is_running_from_install_dir() -> bool {
     }
 }
 
+  fn files_are_identical(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let a_meta = match fs::metadata(a) {
+      Ok(m) => m,
+      Err(_) => return false,
+    };
+    let b_meta = match fs::metadata(b) {
+      Ok(m) => m,
+      Err(_) => return false,
+    };
+
+    if a_meta.len() != b_meta.len() {
+      return false;
+    }
+
+    match (fs::read(a), fs::read(b)) {
+      (Ok(a_bytes), Ok(b_bytes)) => a_bytes == b_bytes,
+      _ => false,
+    }
+  }
+
+  fn terminate_other_wallpaper_processes() {
+    let current_pid = std::process::id();
+    let pid_filter = format!("PID ne {}", current_pid);
+
+    let output = std::process::Command::new("taskkill")
+      .args([
+        "/F",
+        "/FI",
+        "IMAGENAME eq sentinel-wallpaper.exe",
+        "/FI",
+        &pid_filter,
+      ])
+      .output();
+
+    match output {
+      Ok(o) => {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        let stderr = String::from_utf8_lossy(&o.stderr);
+        info!(
+          "[{}] taskkill result (code={:?}) stdout='{}' stderr='{}'",
+          ADDON_NAME,
+          o.status.code(),
+          stdout.trim(),
+          stderr.trim()
+        );
+      }
+      Err(e) => warn!("[{}] Failed to run taskkill for wallpaper processes: {e}", ADDON_NAME),
+    }
+  }
+
 /// Check if sentinelc.exe (the backend) is running; if not, start it.
 fn ensure_backend_running() {
     info!("[{}] Checking if sentinelc.exe is running...", ADDON_NAME);
@@ -137,23 +187,21 @@ pub fn bootstrap_addon() {
     info!("[{}] Source: {}", ADDON_NAME, current_exe.display());
     info!("[{}] Target: {}", ADDON_NAME, dst.display());
 
-    let should_copy = match (fs::metadata(&current_exe), fs::metadata(&dst)) {
-        (Ok(src_meta), Ok(dst_meta)) => {
-            let src_size = src_meta.len();
-            let dst_size = dst_meta.len();
-            let src_newer = src_meta.modified().ok().zip(dst_meta.modified().ok())
-                .map(|(s, d)| s > d).unwrap_or(false);
-            info!("[{}] Source size={src_size}, Target size={dst_size}, source_newer={src_newer}", ADDON_NAME);
-            src_newer || src_size != dst_size
+    let should_copy = match fs::metadata(&current_exe) {
+      Ok(src_meta) => {
+        if !dst.exists() {
+          info!("[{}] Target does not exist, source size={}", ADDON_NAME, src_meta.len());
+          true
+        } else {
+          let identical = files_are_identical(&current_exe, &dst);
+          info!("[{}] Source size={}, identical_with_target={}", ADDON_NAME, src_meta.len(), identical);
+          !identical
         }
-        (Ok(src_meta), Err(_)) => {
-            info!("[{}] Target does not exist, source size={}", ADDON_NAME, src_meta.len());
-            true
-        }
-        _ => {
-            warn!("[{}] Cannot read source exe metadata", ADDON_NAME);
-            false
-        }
+      }
+      Err(_) => {
+        warn!("[{}] Cannot read source exe metadata", ADDON_NAME);
+        false
+      }
     };
 
     if should_copy {
@@ -161,8 +209,18 @@ pub fn bootstrap_addon() {
         match fs::copy(&current_exe, &dst) {
             Ok(bytes) => info!("[{}] Copied {bytes} bytes -> {}", ADDON_NAME, dst.display()),
             Err(e) => {
-                warn!("[{}] Failed to copy exe: {e}", ADDON_NAME);
-                return;
+          warn!("[{}] Failed to copy exe on first attempt: {e}", ADDON_NAME);
+          info!("[{}] Attempting to stop other wallpaper processes and retry copy", ADDON_NAME);
+          terminate_other_wallpaper_processes();
+          std::thread::sleep(std::time::Duration::from_millis(300));
+
+          match fs::copy(&current_exe, &dst) {
+            Ok(bytes) => info!("[{}] Copied {bytes} bytes on retry -> {}", ADDON_NAME, dst.display()),
+            Err(e2) => {
+              warn!("[{}] Failed to copy exe after retry: {e2}", ADDON_NAME);
+              return;
+            }
+          }
             }
         }
     } else {
