@@ -10,10 +10,6 @@
  *
  * The wallpaper addon pushes these message types:
  *   native_registry  – full sysdata + appdata snapshot (periodic, ~100ms)
- *   native_audio     – real-time audio peak level
- *   native_move      – cursor movement (local + normalised coords)
- *   native_click     – mouse click (local + normalised coords)
- *   native_key       – keyboard key down/up
  *   native_pause     – wallpaper paused/resumed
  *   native_css_vars  – live CSS variable updates from manifest editable changes
  *
@@ -42,16 +38,16 @@
  *     Sentinel.subscribe('ram', data => { ... });
  *     Sentinel.subscribe('displays', displays => { ... });
  *
+ *     // Subscribe to media session data (extracted from audio)
+ *     Sentinel.subscribe('media', session => {
+ *       console.log(session.title, session.artist, session.playing);
+ *     });
+ *
  *     // Subscribe to per-monitor appdata
  *     Sentinel.subscribe('appdata', allMonitors => { ... });
  *     Sentinel.subscribe('appdata:MONITOR_0', monitorData => { ... });
  *
- *     // Subscribe to interaction events
- *     Sentinel.on('move', e => { ... });
- *     Sentinel.on('click', e => { ... });
- *     Sentinel.on('keydown', e => { ... });
- *     Sentinel.on('keyup', e => { ... });
- *     Sentinel.on('audio', e => { ... });
+ *     // Lifecycle / notification events
  *     Sentinel.on('pause', e => { ... });
  *     Sentinel.on('resume', e => { ... });
  *
@@ -59,6 +55,10 @@
  *     const cpu = Sentinel.get('cpu');
  *     const allSys = Sentinel.sysdata;
  *     const allApp = Sentinel.appdata;
+ *
+ *     // Media session helpers
+ *     const media = Sentinel.media;                   // current media session
+ *     const media2 = Sentinel.get('media');            // same thing via get()
  *
  *     // Display helpers
  *     const monitors = Sentinel.displays;              // flat metadata array
@@ -78,6 +78,65 @@
   let _sysdata = null;
   let _appdata = null;
   let _paused = false;
+  let _monitorBounds = null;
+  const _lastDemandSig = { value: '' };
+
+  const SYS_SECTION_KEYS = {
+    cpu: 'cpu', gpu: 'gpu', ram: 'ram', storage: 'storage',
+    network: 'network', audio: 'audio', time: 'time',
+    keyboard: 'keyboard', mouse: 'mouse', power: 'power',
+    bluetooth: 'bluetooth', wifi: 'wifi', system: 'system',
+    processes: 'processes', idle: 'idle', displays: 'displays'
+  };
+
+  function computeDemandSections() {
+    var set = {};
+    for (var key in _subscribers) {
+      if (!_subscribers.hasOwnProperty(key)) continue;
+      var arr = _subscribers[key];
+      if (!arr || arr.length === 0) continue;
+
+      if (key === 'sysdata') {
+        for (var section in SYS_SECTION_KEYS) {
+          if (SYS_SECTION_KEYS.hasOwnProperty(section)) set[SYS_SECTION_KEYS[section]] = true;
+        }
+        continue;
+      }
+
+      if (key === 'appdata' || key.indexOf('appdata:') === 0) {
+        set.appdata = true;
+        continue;
+      }
+
+      // 'media' is a virtual key — it needs the 'audio' section
+      if (key === 'media') {
+        set.audio = true;
+        continue;
+      }
+
+      if (SYS_SECTION_KEYS[key]) {
+        set[SYS_SECTION_KEYS[key]] = true;
+      }
+    }
+
+    return Object.keys(set).sort();
+  }
+
+  function publishDemandSections() {
+    if (!(root.chrome && root.chrome.webview && typeof root.chrome.webview.postMessage === 'function')) return;
+
+    var sections = computeDemandSections();
+    var sig = sections.join('|');
+    if (_lastDemandSig.value === sig) return;
+    _lastDemandSig.value = sig;
+
+    try {
+      root.chrome.webview.postMessage({
+        type: 'sentinel_demands',
+        sections: sections
+      });
+    } catch (_) {}
+  }
 
   /* Fast, cheap string hash for change detection (djb2) */
   function djb2(str) {
@@ -109,40 +168,6 @@
         emit('registry', { sysdata: _sysdata, appdata: _appdata });
         break;
 
-      /* ─── Audio level ─── */
-      case 'native_audio': {
-        const level = Number.isFinite(d.level) ? Math.max(0, Math.min(1, d.level)) : 0;
-        emit('audio', { level });
-        break;
-      }
-
-      /* ─── Cursor movement ─── */
-      case 'native_move':
-        emit('move', {
-          x: d.x,  y: d.y,
-          nx: d.nx, ny: d.ny
-        });
-        break;
-
-      /* ─── Mouse click ─── */
-      case 'native_click':
-        emit('click', {
-          x: d.x,  y: d.y,
-          nx: d.nx, ny: d.ny
-        });
-        break;
-
-      /* ─── Keyboard ─── */
-      case 'native_key':
-        if (d.state === 'down') {
-          emit('keydown', { key: d.key, vk: d.vk });
-          emit('key', { key: d.key, vk: d.vk, state: 'down' });
-        } else if (d.state === 'up') {
-          emit('keyup', { key: d.key, vk: d.vk });
-          emit('key', { key: d.key, vk: d.vk, state: 'up' });
-        }
-        break;
-
       /* ─── Pause / Resume ─── */
       case 'native_pause':
         _paused = !!d.paused;
@@ -161,6 +186,17 @@
           }
           emit('cssvarchange', d.vars);
         }
+        break;
+
+      /* ─── Per-monitor bounds (for local cursor mapping) ─── */
+      case 'native_monitor_bounds':
+        _monitorBounds = {
+          left: Number(d.left) || 0,
+          top: Number(d.top) || 0,
+          width: Number(d.width) || 1,
+          height: Number(d.height) || 1,
+        };
+        emit('monitorbounds', _monitorBounds);
         break;
     }
   }
@@ -185,6 +221,23 @@
       var cbs = _subscribers[key];
       for (var i = 0; i < cbs.length; i++) {
         try { cbs[i](val); } catch (e) { console.error('[Sentinel] subscriber error (' + key + '):', e); }
+      }
+    }
+
+    // Fire 'media' virtual subscribers with the media_session from audio
+    if (sys.audio && sys.audio.media_session) {
+      var mediaVal = sys.audio.media_session;
+      var mediaKey = 'media';
+      if (mediaKey in _subscribers && _subscribers[mediaKey].length > 0) {
+        var mJson = JSON.stringify(mediaVal);
+        var mHash = djb2(mJson);
+        if (_prevHash[mediaKey] !== mHash) {
+          _prevHash[mediaKey] = mHash;
+          var mCbs = _subscribers[mediaKey];
+          for (var mi = 0; mi < mCbs.length; mi++) {
+            try { mCbs[mi](mediaVal); } catch (e) { console.error('[Sentinel] subscriber error (media):', e); }
+          }
+        }
       }
     }
 
@@ -258,6 +311,24 @@
     get appdata() { return _appdata; },
 
     /**
+     * Latest media session data (extracted from audio.media_session).
+     * Contains: playing, title, artist, album, timeline, playback_status, etc.
+     * Returns null if no media data is available.
+     * @returns {object|null}
+     */
+    get media() {
+      if (!_sysdata || !_sysdata.audio) return null;
+      return _sysdata.audio.media_session || null;
+    },
+
+    /**
+     * Monitor bounds for this WebView instance.
+     * { left, top, width, height } in virtual-screen pixels, or null.
+     * @returns {object|null}
+     */
+    get monitorBounds() { return _monitorBounds; },
+
+    /**
      * Flat array of display metadata objects (unwrapped from registry entries).
      * Each element is the raw metadata: { id, primary, x, y, width, height, scale, ... }
      * Returns empty array if no display data is available.
@@ -282,11 +353,12 @@
     /**
      * Get a specific sysdata category's current cached data.
      * @param {string} category - e.g. 'cpu', 'gpu', 'ram', 'storage', 'network',
-     *   'audio', 'time', 'keyboard', 'mouse', 'power', 'bluetooth', 'wifi',
-     *   'system', 'processes', 'idle', 'displays'
+     *   'audio', 'media', 'time', 'keyboard', 'mouse', 'power', 'bluetooth',
+     *   'wifi', 'system', 'processes', 'idle', 'displays'
      * @returns {object|null}
      */
     get(category) {
+      if (category === 'media') return this.media;
       return _sysdata ? (_sysdata[category] || null) : null;
     },
 
@@ -342,7 +414,7 @@
      * for that category has changed since the last update.
      *
      * Categories:
-     *   sysdata keys: cpu, gpu, ram, storage, network, audio, time,
+     *   sysdata keys: cpu, gpu, ram, storage, network, audio, media, time,
      *                 keyboard, mouse, power, bluetooth, wifi, system,
      *                 processes, idle, displays
      *   Wildcards:    sysdata (full object), appdata (full object)
@@ -358,6 +430,7 @@
       }
       if (!_subscribers[category]) _subscribers[category] = [];
       _subscribers[category].push(callback);
+      publishDemandSections();
 
       // Return unsubscribe function
       return function unsubscribe() {
@@ -365,19 +438,14 @@
         if (!arr) return;
         var idx = arr.indexOf(callback);
         if (idx !== -1) arr.splice(idx, 1);
+        publishDemandSections();
       };
     },
 
     /**
-     * Listen for interaction / lifecycle events.
+    * Listen for lifecycle / notification events.
      *
      * Events:
-     *   move        – { x, y, nx, ny }
-     *   click       – { x, y, nx, ny }
-     *   keydown     – { key, vk }
-     *   keyup       – { key, vk }
-     *   key         – { key, vk, state: 'down'|'up' }
-     *   audio       – { level: 0..1 }
      *   pause       – { paused: true }
      *   resume      – { paused: false }
      *   pausechange – { paused: bool }
@@ -422,6 +490,7 @@
       for (var k in _subscribers) delete _subscribers[k];
       for (var k in _eventListeners) delete _eventListeners[k];
       for (var k in _prevHash) delete _prevHash[k];
+      publishDemandSections();
     },
 
     /* ─── Utility helpers ─── */

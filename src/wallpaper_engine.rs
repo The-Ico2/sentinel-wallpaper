@@ -15,24 +15,18 @@ use image::{Rgba, RgbaImage};
 use windows::{
     core::{w, BOOL, PCWSTR},
     Win32::{
-        Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::Gdi::{
             BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
             EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, HDC, HGDIOBJ, HMONITOR, MonitorFromWindow,
             MONITORINFOEXW, MONITOR_DEFAULTTONEAREST, ReleaseDC, SelectObject, BI_RGB, BITMAPINFO, BITMAPINFOHEADER,
             DIB_RGB_COLORS, SRCCOPY,
         },
-        Media::Audio::{
-            eCommunications, eConsole, eMultimedia, eRender, IMMDeviceEnumerator,
-            MMDeviceEnumerator,
-        },
-        Media::Audio::Endpoints::IAudioMeterInformation,
         Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
         System::{Com::*, LibraryLoader::GetModuleHandleW},
-        UI::Input::KeyboardAndMouse::GetAsyncKeyState,
         UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, FindWindowExW, FindWindowW,
-            GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsZoomed, RegisterClassW, SendMessageTimeoutW,
+            GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsZoomed, RegisterClassW, SendMessageTimeoutW,
             SetWindowLongW,
             SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
             SMTO_NORMAL, SWP_FRAMECHANGED,
@@ -97,37 +91,8 @@ impl Drop for HostedWallpaper {
     }
 }
 
-/// Virtual-key codes we poll each tick for `native_key` events.
-const TRACKED_KEYS: &[(i32, &str)] = &[
-    (0x08, "Backspace"), (0x09, "Tab"), (0x0D, "Enter"), (0x10, "Shift"),
-    (0x11, "Control"), (0x12, "Alt"), (0x14, "CapsLock"), (0x1B, "Escape"),
-    (0x20, "Space"),
-    (0x25, "ArrowLeft"), (0x26, "ArrowUp"), (0x27, "ArrowRight"), (0x28, "ArrowDown"),
-    // digits 0-9
-    (0x30, "0"), (0x31, "1"), (0x32, "2"), (0x33, "3"), (0x34, "4"),
-    (0x35, "5"), (0x36, "6"), (0x37, "7"), (0x38, "8"), (0x39, "9"),
-    // letters A-Z
-    (0x41, "A"), (0x42, "B"), (0x43, "C"), (0x44, "D"), (0x45, "E"),
-    (0x46, "F"), (0x47, "G"), (0x48, "H"), (0x49, "I"), (0x4A, "J"),
-    (0x4B, "K"), (0x4C, "L"), (0x4D, "M"), (0x4E, "N"), (0x4F, "O"),
-    (0x50, "P"), (0x51, "Q"), (0x52, "R"), (0x53, "S"), (0x54, "T"),
-    (0x55, "U"), (0x56, "V"), (0x57, "W"), (0x58, "X"), (0x59, "Y"),
-    (0x5A, "Z"),
-    // F1-F12
-    (0x70, "F1"), (0x71, "F2"), (0x72, "F3"), (0x73, "F4"), (0x74, "F5"),
-    (0x75, "F6"), (0x76, "F7"), (0x77, "F8"), (0x78, "F9"), (0x79, "F10"),
-    (0x7A, "F11"), (0x7B, "F12"),
-];
-
 pub struct WallpaperRuntime {
     hosted: Vec<HostedWallpaper>,
-    last_cursor: Option<(i32, i32)>,
-    last_left_down: bool,
-    pressed_keys: HashSet<i32>,
-    audio_meter: Option<SystemAudioMeter>,
-    last_audio_tick: Instant,
-    last_audio_retry: Instant,
-    last_audio_refresh: Instant,
     last_registry_tick: Instant,
     last_registry_payload: Option<String>,
     last_pause_tick: Instant,
@@ -142,6 +107,8 @@ pub struct WallpaperRuntime {
     /// Whether the last registry IPC call succeeded.
     /// When false, ALL data delivery to webviews is suppressed.
     registry_connected: bool,
+    last_sent_demands: HashSet<String>,
+    monitor_bounds_dirty: bool,
 }
 
 impl WallpaperRuntime {
@@ -151,26 +118,8 @@ impl WallpaperRuntime {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
 
-        let audio_meter = match SystemAudioMeter::new() {
-            Ok(meter) => {
-                warn!("[WALLPAPER][AUDIO] System output meter initialized");
-                Some(meter)
-            }
-            Err(e) => {
-                warn!("[WALLPAPER][AUDIO] System output meter unavailable: {}", e);
-                None
-            }
-        };
-
         Self {
             hosted: Vec::new(),
-            last_cursor: None,
-            last_left_down: false,
-            pressed_keys: HashSet::new(),
-            audio_meter,
-            last_audio_tick: Instant::now(),
-            last_audio_retry: Instant::now(),
-            last_audio_refresh: Instant::now(),
             last_registry_tick: Instant::now(),
             last_registry_payload: None,
             last_pause_tick: Instant::now(),
@@ -183,17 +132,13 @@ impl WallpaperRuntime {
             last_editable_tick: Instant::now(),
             editable_cache: HashMap::new(),
             registry_connected: false,
+            last_sent_demands: HashSet::new(),
+            monitor_bounds_dirty: true,
         }
     }
 
     pub fn apply(&mut self, config: &AddonConfig) {
         self.hosted.clear();
-        self.last_cursor = None;
-        self.last_left_down = false;
-        self.pressed_keys.clear();
-        self.last_audio_tick = Instant::now();
-        self.last_audio_retry = Instant::now();
-        self.last_audio_refresh = Instant::now();
         self.last_registry_tick = Instant::now();
         self.last_registry_payload = None;
         self.last_pause_tick = Instant::now();
@@ -213,6 +158,7 @@ impl WallpaperRuntime {
         self.last_editable_tick = Instant::now();
         self.editable_cache.clear();
         self.registry_connected = false;
+        self.last_sent_demands.clear();
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -401,6 +347,7 @@ impl WallpaperRuntime {
             paused: false,
             asset_dir: asset_dir.to_path_buf(),
         });
+        self.monitor_bounds_dirty = true;
         warn!("[WALLPAPER][EMBED] host committed into runtime state");
         Ok(())
     }
@@ -413,45 +360,59 @@ impl WallpaperRuntime {
         let mut unpaused_transition = false;
 
         let all_paused = self.hosted.iter().all(|h| h.paused);
-        let registry_interval = if all_paused {
-            self.pause_check_interval
-        } else {
-            Duration::from_millis(100)
-        };
+
+        let demanded_sections = self.current_demanded_sections();
+        if demanded_sections != self.last_sent_demands {
+            self.send_tracking_demands(&demanded_sections);
+            self.last_sent_demands = demanded_sections.clone();
+        }
 
         // ── Registry snapshot (determines connectivity) ─────────────
-        if self.last_registry_tick.elapsed() >= registry_interval {
-            self.last_registry_tick = Instant::now();
+        self.last_registry_tick = Instant::now();
 
-            if let Some((sysdata, appdata, payload)) = build_registry_snapshot_and_payload() {
-                if !self.registry_connected {
-                    warn!("[WALLPAPER][REGISTRY] Connection established");
+        if let Some((sysdata, appdata, payload)) = build_registry_snapshot_and_payload(&demanded_sections) {
+            if !self.registry_connected {
+                warn!("[WALLPAPER][REGISTRY] Connection established");
+            }
+            self.registry_connected = true;
+            self.cached_sysdata = sysdata;
+            self.cached_appdata = appdata;
+            let has_active_hosts = self.hosted.iter().any(|h| !h.paused);
+            let should_send = self
+                .last_registry_payload
+                .as_ref()
+                .map(|prev| prev != &payload)
+                .unwrap_or(true);
+
+            if has_active_hosts && should_send {
+                self.last_registry_payload = Some(payload.clone());
+                for hosted in &self.hosted {
+                    if hosted.paused {
+                        continue;
+                    }
+                    let _ = post_webview_json(&hosted.webview, &payload);
                 }
-                self.registry_connected = true;
-                self.cached_sysdata = sysdata;
-                self.cached_appdata = appdata;
-                let has_active_hosts = self.hosted.iter().any(|h| !h.paused);
-                let should_send = self
-                    .last_registry_payload
-                    .as_ref()
-                    .map(|prev| prev != &payload)
-                    .unwrap_or(true);
-
-                if has_active_hosts && should_send {
-                    self.last_registry_payload = Some(payload.clone());
+                // Send per-monitor bounds so each WebView can map cursor to local coords
+                if self.monitor_bounds_dirty {
+                    self.monitor_bounds_dirty = false;
                     for hosted in &self.hosted {
-                        if hosted.paused {
-                            continue;
-                        }
-                        let _ = post_webview_json(&hosted.webview, &payload);
+                        let r = hosted.monitor_rect;
+                        let bounds_payload = serde_json::json!({
+                            "type": "native_monitor_bounds",
+                            "left": r.left,
+                            "top": r.top,
+                            "width": r.right - r.left,
+                            "height": r.bottom - r.top,
+                        }).to_string();
+                        let _ = post_webview_json(&hosted.webview, &bounds_payload);
                     }
                 }
-            } else {
-                if self.registry_connected {
-                    warn!("[WALLPAPER][REGISTRY] Connection lost — suppressing all data delivery");
-                }
-                self.registry_connected = false;
             }
+        } else {
+            if self.registry_connected {
+                warn!("[WALLPAPER][REGISTRY] Connection lost — suppressing all data delivery");
+            }
+            self.registry_connected = false;
         }
 
         // ── All interaction data gated behind registry connection ───
@@ -464,126 +425,8 @@ impl WallpaperRuntime {
             return false;
         }
 
-        let mut point = POINT::default();
         if !all_paused {
-            unsafe {
-                if GetCursorPos(&mut point).is_err() {
-                    return false;
-                }
-            }
-
-            let cursor = (point.x, point.y);
-            let left_down = unsafe { (GetAsyncKeyState(0x01_i32) as u16 & 0x8000) != 0 };
-            let moved = self.last_cursor.map(|p| p != cursor).unwrap_or(true);
-            let just_pressed = left_down && !self.last_left_down;
-
-            if moved || just_pressed {
-                for hosted in &self.hosted {
-                    if hosted.paused || !point_in_rect(cursor, hosted.monitor_rect) {
-                        continue;
-                    }
-
-                    let width = (hosted.monitor_rect.right - hosted.monitor_rect.left).max(1);
-                    let height = (hosted.monitor_rect.bottom - hosted.monitor_rect.top).max(1);
-                    let local_x = (cursor.0 - hosted.monitor_rect.left).clamp(0, width);
-                    let local_y = (cursor.1 - hosted.monitor_rect.top).clamp(0, height);
-                    let norm_x = local_x as f64 / width as f64;
-                    let norm_y = local_y as f64 / height as f64;
-
-                    if moved {
-                        let payload = format!(
-                            "{{\"type\":\"native_move\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
-                            local_x, local_y, norm_x, norm_y
-                        );
-                        let _ = post_webview_json(&hosted.webview, &payload);
-                    }
-
-                    if just_pressed {
-                        let payload = format!(
-                            "{{\"type\":\"native_click\",\"x\":{},\"y\":{},\"nx\":{:.6},\"ny\":{:.6}}}",
-                            local_x, local_y, norm_x, norm_y
-                        );
-                        let _ = post_webview_json(&hosted.webview, &payload);
-                    }
-                }
-            }
-
-            self.last_cursor = Some(cursor);
-            self.last_left_down = left_down;
-
-            // ── Keyboard tracking ──────────────────────────────────
-            for &(vk, label) in TRACKED_KEYS {
-                let down = unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
-                let was_down = self.pressed_keys.contains(&vk);
-                if down && !was_down {
-                    self.pressed_keys.insert(vk);
-                    let payload = format!(
-                        "{{\"type\":\"native_key\",\"key\":\"{}\",\"vk\":{},\"state\":\"down\"}}",
-                        label, vk
-                    );
-                    for hosted in &self.hosted {
-                        if !hosted.paused {
-                            let _ = post_webview_json(&hosted.webview, &payload);
-                        }
-                    }
-                } else if !down && was_down {
-                    self.pressed_keys.remove(&vk);
-                    let payload = format!(
-                        "{{\"type\":\"native_key\",\"key\":\"{}\",\"vk\":{},\"state\":\"up\"}}",
-                        label, vk
-                    );
-                    for hosted in &self.hosted {
-                        if !hosted.paused {
-                            let _ = post_webview_json(&hosted.webview, &payload);
-                        }
-                    }
-                }
-            }
-        }
-
-        if !all_paused && self.last_audio_tick.elapsed() >= Duration::from_millis(33) {
-            self.last_audio_tick = Instant::now();
-
-            if self.last_audio_refresh.elapsed() >= Duration::from_millis(1200) {
-                self.last_audio_refresh = Instant::now();
-                if let Some(meter) = self.audio_meter.as_mut() {
-                    if let Err(e) = meter.refresh() {
-                        warn!("[WALLPAPER][AUDIO] Endpoint refresh failed: {}", e);
-                        self.audio_meter = None;
-                    }
-                }
-            }
-
-            if self.audio_meter.is_none() && self.last_audio_retry.elapsed() >= Duration::from_secs(2) {
-                self.last_audio_retry = Instant::now();
-                match SystemAudioMeter::new() {
-                    Ok(meter) => {
-                        warn!("[WALLPAPER][AUDIO] System output meter restored");
-                        self.audio_meter = Some(meter);
-                    }
-                    Err(e) => {
-                        warn!("[WALLPAPER][AUDIO] Retry failed: {}", e);
-                    }
-                }
-            }
-
-            if let Some(meter) = self.audio_meter.as_mut() {
-                match meter.peak() {
-                    Ok(level) => {
-                        let payload = format!("{{\"type\":\"native_audio\",\"level\":{:.6}}}", level);
-                        for hosted in &self.hosted {
-                            if hosted.paused {
-                                continue;
-                            }
-                            let _ = post_webview_json(&hosted.webview, &payload);
-                        }
-                    }
-                    Err(e) => {
-                        warn!("[WALLPAPER][AUDIO] Peak read failed, resetting meter: {}", e);
-                        self.audio_meter = None;
-                    }
-                }
-            }
+            // Addons do not generate independent runtime telemetry.
         }
 
         // ── Live editable CSS var updates (manifest.json watch) ──
@@ -645,6 +488,28 @@ impl WallpaperRuntime {
 
     pub fn has_registry_snapshot(&self) -> bool {
         !self.cached_sysdata.is_null() && !self.cached_appdata.is_null()
+    }
+
+    fn current_demanded_sections(&self) -> HashSet<String> {
+        if !self.hosted.iter().any(|h| !h.paused) {
+            return HashSet::new();
+        }
+
+        [
+            "time", "cpu", "gpu", "ram", "storage", "displays", "network", "wifi",
+            "bluetooth", "audio", "keyboard", "mouse", "power", "idle", "system",
+            "processes", "appdata",
+        ]
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    fn send_tracking_demands(&self, demanded_sections: &HashSet<String>) {
+        let mut sections: Vec<String> = demanded_sections.iter().cloned().collect();
+        sections.sort();
+        let args = serde_json::json!({ "sections": sections });
+        let _ = request_quick("backend", "set_tracking_demands", Some(args));
     }
 
     pub fn sync_pause_state_now(&mut self, all_paused_before: bool) -> bool {
@@ -1267,10 +1132,13 @@ fn power_on_battery(sysdata: &Value) -> bool {
             .unwrap_or(false)
 }
 
-fn build_registry_snapshot_and_payload() -> Option<(Value, Value, String)> {
+fn build_registry_snapshot_and_payload(sections: &HashSet<String>) -> Option<(Value, Value, String)> {
     // Single IPC round-trip using the combined `snapshot` command.
     // Uses request_quick (no retries) so the tick loop never blocks for seconds.
-    let snapshot_raw = request_quick("registry", "snapshot", None)?;
+    let mut section_list: Vec<String> = sections.iter().cloned().collect();
+    section_list.sort();
+    let args = serde_json::json!({ "sections": section_list });
+    let snapshot_raw = request_quick("registry", "snapshot", Some(args))?;
     let snapshot: Value = serde_json::from_str(&snapshot_raw).ok()?;
 
     let sysdata = snapshot.get("sysdata").cloned().unwrap_or(Value::Null);
@@ -1284,76 +1152,6 @@ fn build_registry_snapshot_and_payload() -> Option<(Value, Value, String)> {
     .to_string();
 
     Some((sysdata, appdata, payload))
-}
-
-struct SystemAudioMeter {
-    enumerator: IMMDeviceEnumerator,
-    meters: Vec<IAudioMeterInformation>,
-}
-
-impl SystemAudioMeter {
-    fn new() -> std::result::Result<Self, String> {
-        unsafe {
-            let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                .map_err(|e| format!("CoCreateInstance(MMDeviceEnumerator) failed: {e:?}"))?;
-
-            let mut meter = Self {
-                enumerator,
-                meters: Vec::new(),
-            };
-            meter.refresh()?;
-            Ok(meter)
-        }
-    }
-
-    fn refresh(&mut self) -> std::result::Result<(), String> {
-        unsafe {
-            let mut meters = Vec::<IAudioMeterInformation>::new();
-            for role in [eConsole, eMultimedia, eCommunications] {
-                if let Ok(device) = self.enumerator.GetDefaultAudioEndpoint(eRender, role) {
-                    if let Ok(meter) = device.Activate::<IAudioMeterInformation>(CLSCTX_ALL, None) {
-                        meters.push(meter);
-                    }
-                }
-            }
-
-            if meters.is_empty() {
-                return Err("No usable default render endpoint audio meters found".to_string());
-            }
-
-            self.meters = meters;
-            Ok(())
-        }
-    }
-
-    fn peak(&self) -> std::result::Result<f32, String> {
-        unsafe {
-            let mut best = 0.0f32;
-            let mut had_success = false;
-
-            for meter in &self.meters {
-                match meter.GetPeakValue() {
-                    Ok(peak) => {
-                        had_success = true;
-                        if peak > best {
-                            best = peak;
-                        }
-                    }
-                    Err(_) => {}
-                }
-            }
-
-            if !had_success {
-                return Err("All audio meter reads failed".to_string());
-            }
-
-            Ok(best.clamp(0.0, 1.0))
-        }
-    }
-}
-
-fn point_in_rect(point: (i32, i32), rect: RECT) -> bool {
-    point.0 >= rect.left && point.0 < rect.right && point.1 >= rect.top && point.1 < rect.bottom
 }
 
 fn post_webview_json(webview: &ICoreWebView2, payload: &str) -> std::result::Result<(), String> {
@@ -1670,65 +1468,7 @@ fn fetch_wallpaper_assets() -> Vec<RegistryAsset> {
         warn!("[WALLPAPER] IPC list_assets request failed");
     }
 
-    let local_assets = fetch_local_wallpaper_assets();
-    if local_assets.is_empty() {
-        warn!("[WALLPAPER] Local fallback found no wallpaper assets");
-    } else {
-        warn!("[WALLPAPER] Using local fallback: loaded {} wallpaper asset(s)", local_assets.len());
-    }
-
-    local_assets
-}
-
-fn fetch_local_wallpaper_assets() -> Vec<RegistryAsset> {
-    let Some(root) = sentinel_assets_dir().map(|p| p.join("wallpaper")) else {
-        return Vec::new();
-    };
-
-    let Ok(read_dir) = fs::read_dir(&root) else {
-        return Vec::new();
-    };
-
-    let mut results = Vec::<RegistryAsset>::new();
-
-    for entry in read_dir.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-
-        let manifest_path = dir.join("manifest.json");
-        if !manifest_path.exists() {
-            continue;
-        }
-
-        let Ok(raw) = fs::read_to_string(&manifest_path) else {
-            continue;
-        };
-
-        let Ok(metadata) = serde_json::from_str::<Value>(&raw) else {
-            continue;
-        };
-
-        let id = metadata
-            .get("id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .or_else(|| dir.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()));
-
-        let Some(id) = id else {
-            continue;
-        };
-
-        results.push(RegistryAsset {
-            id,
-            category: "wallpaper".to_string(),
-            metadata,
-            path: dir,
-        });
-    }
-
-    results
+    Vec::new()
 }
 
 fn resolve_asset<'a>(assets: &'a [RegistryAsset], wallpaper_id: &str) -> Option<&'a RegistryAsset> {

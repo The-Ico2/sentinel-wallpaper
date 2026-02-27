@@ -253,7 +253,7 @@ canvas{
   background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
   border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
   border-radius: calc(var(--panel-radius) * 1px);
-  padding: calc(var(--panel-padding-y) * 1px) calc(var(--panel-padding-x) * 1px);
+  padding: 0;
   backdrop-filter: blur(calc(var(--top-blur) * 1px));
   overflow: hidden;
   position: relative;
@@ -261,22 +261,18 @@ canvas{
   flex-shrink: 1;
 }
 
-.vizPanel h2 {
-  font-size: 10.5px;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.75);
-  margin-bottom: 6px;
-}
-
 .vizPanel canvas {
   position: absolute;
-  left: 12px;
-  top: 28px;
-  right: 12px;
-  bottom: 10px;
-  border-radius: 6px;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: calc(var(--panel-radius) * 1px);
   display: block;
+}
+
+#levelCanvas {
+  z-index: 1;
 }
 
 /* status bar */
@@ -390,9 +386,8 @@ canvas{
       <div id="mediaInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
     </div>
     <div class="vizPanel" id="vizPanel">
-      <h2>Audio</h2>
-      <canvas id="levelCanvas"></canvas>
       <canvas id="freqCanvas"></canvas>
+      <canvas id="levelCanvas"></canvas>
     </div>
   </div>
 
@@ -424,6 +419,8 @@ let lastFrameTime = performance.now(), fps = 60;
 let moveCount = 0, clickCount = 0, keyDownCount = 0, keyUpCount = 0;
 let lastKey = '—', lastEvent = '—';
 const activeKeys = new Set();
+let lastMouseSnapshot = null;
+let lastKeyboardSnapshot = null;
 
 /* ───────── Capability signals ───────── */
 const capDefs = [
@@ -456,61 +453,203 @@ const EMBER_COUNT = 70;
 const TENDRIL_COUNT = 6;
 const WARDEN_CONNECT_DIST = 180;
 
+/* ───────── Performance: cached sprites & patterns ───────── */
+let _scanlinePat = null;       // CanvasPattern for CRT scanlines
+let _vigGrad = null;           // Cached vignette CanvasGradient
+let _vigW = 0, _vigH = 0;     // Size key – recreate when canvas resizes
+let _emberSprite = null;       // Offscreen glow sprite for embers
+let _fgSprite = null;          // Offscreen glow sprite for foreground particles
+let _trailSprite = null;       // Offscreen glow sprite for mouse trails
+let _spriteColorKey = '';      // Invalidation key (theme-dependent)
+
+const _SPRITE_DIM = 64;       // Glow sprite resolution (px, square)
+
+/** Build a radial-gradient sprite on an offscreen canvas.
+ *  `stops` is an array of [offset, r, g, b, a]. */
+function _makeGlowSprite(stops) {
+  const c = document.createElement('canvas');
+  c.width = _SPRITE_DIM; c.height = _SPRITE_DIM;
+  const gx = c.getContext('2d');
+  const h = _SPRITE_DIM / 2;
+  const g = gx.createRadialGradient(h, h, 0, h, h, h);
+  for (const s of stops) g.addColorStop(s[0], `rgba(${s[1]},${s[2]},${s[3]},${s[4]})`);
+  gx.fillStyle = g;
+  gx.fillRect(0, 0, _SPRITE_DIM, _SPRITE_DIM);
+  return c;
+}
+
+/** Rebuild all glow sprites when accent / ember colours change. */
+function _rebuildSprites() {
+  const key = `${acR},${acG},${acB},${emR},${emG},${emB}`;
+  if (_spriteColorKey === key) return;
+  _spriteColorKey = key;
+  _emberSprite = _makeGlowSprite([
+    [0,   emR, Math.floor(emG * .7 + 56), Math.floor(emB * .67 + 28), 1],
+    [.5,  acR, acG, acB, .375],
+    [1,   0, 0, 0, 0],
+  ]);
+  _fgSprite = _makeGlowSprite([
+    [0, acR, acG, acB, 1],
+    [1, 0, 0, 0, 0],
+  ]);
+  _trailSprite = _makeGlowSprite([
+    [0,   emR, Math.floor(emG * .94 + 10), Math.floor(emB * 1.33), 1],
+    [.4,  acR, acG, acB, .375],
+    [1,   0, 0, 0, 0],
+  ]);
+}
+
 /* ───────── Frequency bar graph (peak_32 from backend + synthesized) ───────── */
 const FREQ_BINS = 32;
 const peakHistory = new Float32Array(FREQ_BINS);
 const freqTargets = new Float32Array(FREQ_BINS);
 
+// Frequency graph AGC — tracks the loudest bin and normalizes all bars against it.
+let freqAgcPeak = 0.01;
+const FREQ_AGC_ATTACK  = 0.9;    // instantly jump to new peaks
+const FREQ_AGC_HOLD_SEC = 3;     // hold peak for this long before allowing decay
+const FREQ_AGC_RELEASE = 0.05;   // how fast peak decays after hold expires
+let freqAgcMaxHistory = [];       // [{t, v}] timestamped max-bin samples
+let freqAgcLastMaxTime = 0;
+
+// Frequency AGC floor — rolling minimum of the quietest bin
+let freqAgcFloor = 0;
+const FREQ_AGC_FLOOR_HOLD_SEC = 3;
+let freqAgcMinHistory = [];       // [{t, v}] timestamped min-bin samples
+let freqAgcLastMinTime = 0;
+
 /* ───────── Audio Level line graph with AGC ───────── */
 const LEVEL_BUF_LEN = 300;
-const levelBuffer = new Float32Array(LEVEL_BUF_LEN);  // circular buffer of AGC-normalized values
+const levelBuffer = new Float32Array(LEVEL_BUF_LEN);  // circular buffer of RAW levels (re-normalized at draw time)
 let levelWriteIdx = 0;
 let levelSampleCount = 0;
 
-// Temporal smoothing (EMA)
-let smoothedRawLevel = 0;
-const SMOOTH_ALPHA = 0.18;
+// Visual peak/floor — smoothly track actual AGC values so the graph
+// doesn't jump when the normalization range shifts.
+let visualPeak  = 0.01;
+let visualFloor = 0;
+const VISUAL_ADJUST_SPEED = 0.025;  // how fast visual range tracks actual AGC
 
-// Automatic Gain Control
+// Temporal smoothing (EMA) on the raw level fed into AGC tracking.
+// 1.0 = no smoothing (raw), lower = smoother.
+let smoothedRawLevel = 0;
+const SMOOTH_ALPHA = 0.22;
+
+// Automatic Gain Control — peak tracks the signal ceiling,
+// floor is the lowest level seen over a rolling time window.
 let agcPeak  = 0.01;   // tracks the signal ceiling
-let agcFloor = 0.0;    // tracks the signal floor (anti-peak)
-const AGC_PEAK_ATTACK  = 0.08;   // how fast peak rises to meet signal
-const AGC_PEAK_RELEASE = 0.0008; // how slowly peak decays when signal is lower
-const AGC_FLOOR_ATTACK = 0.0005; // how slowly floor rises toward signal
-const AGC_FLOOR_RELEASE = 0.06;  // how fast floor drops when signal goes below
+let agcFloor = 0;       // tracks the signal floor (rolling minimum)
+const AGC_PEAK_ATTACK  = 0.9;   // peak rises to meet loud transients
+
+// Peak hold — peak instantly rises but only decays after PEAK_HOLD_SEC
+// with no new maximum (mirror of floor behavior).
+const PEAK_HOLD_SEC = 7;              // ← tune this: how long to hold the peak before allowing decay
+const AGC_PEAK_RELEASE = 0.08;        // peak decays at this rate once hold expires
+let agcPeakHistory = [];               // [{t, level}] timestamped peak samples
+let peakLastMaxTime = 0;              // timestamp of the most recent rolling max
+
+// Floor tracking — rolling minimum over FLOOR_WINDOW_SEC seconds.
+// Floor only rises when no new minimum has been recorded in the full window.
+const FLOOR_WINDOW_SEC = 7;           // ← tune this: how long to remember the minimum
+const FLOOR_MIN_DISTANCE = 0.001;     // floor must stay at least this far below peak
+let floorHistory = [];                 // [{t, level}] timestamped samples
+let floorLastMinTime = 0;             // timestamp of the most recent rolling min
+
+function updateFloor(level, now) {
+  // Push new sample
+  floorHistory.push({ t: now, v: level });
+
+  // Evict samples older than the window
+  const cutoff = now - FLOOR_WINDOW_SEC * 1000;
+  while (floorHistory.length > 0 && floorHistory[0].t < cutoff) {
+    floorHistory.shift();
+  }
+
+  // Find minimum in the window
+  let windowMin = Infinity;
+  let windowMinTime = now;
+  for (let i = 0; i < floorHistory.length; i++) {
+    if (floorHistory[i].v < windowMin) {
+      windowMin = floorHistory[i].v;
+      windowMinTime = floorHistory[i].t;
+    }
+  }
+  if (!isFinite(windowMin)) windowMin = 0;
+
+  // Floor instantly drops to new lows
+  if (windowMin <= agcFloor) {
+    agcFloor = windowMin;
+    floorLastMinTime = windowMinTime;
+  } else {
+    // Only allow floor to rise when the entire window has passed
+    // since the last recorded minimum (i.e. no new low in the full window)
+    const windowAge = now - floorLastMinTime;
+    if (windowAge >= FLOOR_WINDOW_SEC * 1000) {
+      // Jump quickly to the new window minimum
+      agcFloor = windowMin;
+      floorLastMinTime = windowMinTime;
+    }
+  }
+
+  // Guarantee floor stays meaningfully below peak (at least FLOOR_MIN_DISTANCE)
+  agcFloor = Math.min(agcFloor, agcPeak - FLOOR_MIN_DISTANCE);
+  agcFloor = Math.max(agcFloor, 0);
+}
+
+function updatePeak(level, now) {
+  // Push new sample
+  agcPeakHistory.push({ t: now, v: level });
+
+  // Evict samples older than the window
+  const cutoff = now - PEAK_HOLD_SEC * 1000;
+  while (agcPeakHistory.length > 0 && agcPeakHistory[0].t < cutoff) {
+    agcPeakHistory.shift();
+  }
+
+  // Find maximum in the window
+  let windowMax = -Infinity;
+  let windowMaxTime = now;
+  for (let i = 0; i < agcPeakHistory.length; i++) {
+    if (agcPeakHistory[i].v > windowMax) {
+      windowMax = agcPeakHistory[i].v;
+      windowMaxTime = agcPeakHistory[i].t;
+    }
+  }
+  if (!isFinite(windowMax)) windowMax = 0.01;
+
+  // Peak instantly rises to new highs
+  if (windowMax >= agcPeak) {
+    agcPeak = windowMax;
+    peakLastMaxTime = windowMaxTime;
+  } else {
+    // Only allow peak to decay when the entire hold window has passed
+    // since the last recorded maximum
+    const windowAge = now - peakLastMaxTime;
+    if (windowAge >= PEAK_HOLD_SEC * 1000) {
+      agcPeak = windowMax;
+      peakLastMaxTime = windowMaxTime;
+    }
+  }
+
+  agcPeak = Math.max(agcPeak, 0.002);
+}
 
 function agcProcess(rawLevel) {
-  // Temporal smoothing first
-  smoothedRawLevel += (rawLevel - smoothedRawLevel) * SMOOTH_ALPHA;
-  const level = smoothedRawLevel;
+  const now = performance.now();
+  const level = rawLevel;
 
-  // Update AGC peak (fast attack, slow release)
-  if (level > agcPeak) {
-    agcPeak += (level - agcPeak) * AGC_PEAK_ATTACK;
-  } else {
-    agcPeak += (level - agcPeak) * AGC_PEAK_RELEASE;
-  }
+  // Update AGC peak (rolling max with hold)
+  updatePeak(level, now);
 
-  // Update AGC floor (slow attack, fast release)
-  if (level < agcFloor) {
-    agcFloor += (level - agcFloor) * AGC_FLOOR_RELEASE;
-  } else {
-    agcFloor += (level - agcFloor) * AGC_FLOOR_ATTACK;
-  }
-
-  // Clamp
-  agcPeak  = Math.max(agcPeak, 0.002);
-  agcFloor = Math.max(0, Math.min(agcFloor, agcPeak - 0.001));
-
-  // Normalize: 0 = floor (anti-peak), 1 = peak
-  const range = agcPeak - agcFloor;
-  const normalized = range > 0.001 ? (level - agcFloor) / range : 0;
-  return Math.max(0, Math.min(1, normalized));
+  // Update AGC floor (rolling minimum)
+  updateFloor(level, now);
 }
 
 function pushLevelSample(rawLevel) {
-  const normalized = agcProcess(rawLevel);
-  levelBuffer[levelWriteIdx] = normalized;
+  // Run AGC to update peak/floor tracking, but store the truly raw level
+  // so the graph can be re-normalized whenever peak/floor change.
+  agcProcess(rawLevel);
+  levelBuffer[levelWriteIdx] = rawLevel;  // no temporal smoothing on the line
   levelWriteIdx = (levelWriteIdx + 1) % LEVEL_BUF_LEN;
   levelSampleCount = Math.min(levelSampleCount + 1, LEVEL_BUF_LEN);
 }
@@ -740,14 +879,6 @@ function updateAudioStats(a) {
     <div class="row"><span class="lbl">RMS</span><span class="val">${lvl.rms != null ? (lvl.rms * 100).toFixed(1) + '%' : '—'}</span></div>
     ${barHTML((lvl.smoothed_peak || 0) * 100, 100, 'rgba(255,140,60,.8)')}
   `;
-
-  /* Update peak_32 frequency data from backend */
-  if (out.history && out.history.peak_32) {
-    const src = out.history.peak_32;
-    for (let i = 0; i < 32; i++) {
-      peakHistory[i] = src[i] != null ? src[i] : 0;
-    }
-  }
 }
 
 /* ─── Power panel ─── */
@@ -1096,9 +1227,8 @@ function renderMediaSession(ms) {
   el.innerHTML = html;
 }
 
-/* ─── Media session (inside audio subscription) ─── */
-function updateMediaSession(a) {
-  const nextMs = a && a.media_session ? a.media_session : null;
+/* ─── Media session (via Sentinel.subscribe('media')) ─── */
+function updateMediaSession(nextMs) {
   if (!nextMs) {
     mediaSessionState.snapshot = null;
     mediaSessionState.basePositionMs = 0;
@@ -1140,12 +1270,24 @@ function fmtTimeMs(ms) {
 /* ─── Interaction stats ─── */
 function updateInterStats() {
   const el = document.getElementById('interStats');
+  const cur = lastMouseSnapshot && lastMouseSnapshot.cursor ? lastMouseSnapshot.cursor : null;
+  const cursorLabel = cur ? `${cur.x}, ${cur.y}` : '—';
+  const toggles = (lastKeyboardSnapshot && lastKeyboardSnapshot.toggle_states) || {};
+  const activeToggleCount =
+    (toggles.caps_lock ? 1 : 0) +
+    (toggles.num_lock ? 1 : 0) +
+    (toggles.scroll_lock ? 1 : 0) +
+    (toggles.insert ? 1 : 0);
+
   el.innerHTML = `
     <div class="row"><span class="lbl">Mouse Pos</span><span class="val">${(mx*100).toFixed(1)}%, ${(my*100).toFixed(1)}%</span></div>
+    <div class="row"><span class="lbl">Cursor</span><span class="val">${cursorLabel}</span></div>
     <div class="row"><span class="lbl">Moves</span><span class="val">${moveCount}</span></div>
     <div class="row"><span class="lbl">Clicks</span><span class="val">${clickCount}</span></div>
     <div class="row"><span class="lbl">Keys ↓/↑</span><span class="val">${keyDownCount} / ${keyUpCount}</span></div>
-    <div class="row"><span class="lbl">Held</span><span class="val">${activeKeys.size}</span></div>
+    <div class="row"><span class="lbl">Keyboard</span><span class="val">${lastKeyboardSnapshot ? (lastKeyboardSnapshot.layout_id || 'Available') : '—'}</span></div>
+    <div class="row"><span class="lbl">Toggles On</span><span class="val">${activeToggleCount}</span></div>
+    <div class="row"><span class="lbl">Held</span><span class="val">${activeKeys.size || activeToggleCount}</span></div>
     <div class="row"><span class="lbl">Last Key</span><span class="val">${lastKey}</span></div>
   `;
 }
@@ -1158,13 +1300,122 @@ Sentinel.subscribe('gpu',     g => updateGPU(g));
 Sentinel.subscribe('ram',     r => updateRAM(r));
 Sentinel.subscribe('storage', s => updateStorage(s));
 Sentinel.subscribe('network', n => updateNetwork(n));
-Sentinel.subscribe('audio',   a => { updateAudioStats(a); updateMediaSession(a); });
+Sentinel.subscribe('audio',   a => {
+  updateAudioStats(a);
+
+  const out = (a && a.output_device) || {};
+  const lvl = (out && out.levels) || {};
+  const rawPeak = lvl.smoothed_peak != null ? lvl.smoothed_peak : (lvl.peak != null ? lvl.peak : out.audio_level);
+  const raw = Math.max(0, Math.min(1, Number(rawPeak) || 0));
+
+  audioTarget = Math.max(audioTarget * .7, Math.pow(Math.min(1, raw * 5), .55));
+  ping('audio');
+  pushLevelSample(raw);
+
+  // Frequency bars — use real FFT spectrum from backend (spectrum_32 is at root level)
+  const spectrum = a && a.spectrum_32;
+  if (spectrum && spectrum.length >= FREQ_BINS) {
+    for (let i = 0; i < FREQ_BINS; i++) {
+      freqTargets[i] = Math.max(freqTargets[i], spectrum[i]);
+    }
+  }
+});
+Sentinel.subscribe('media',  ms => updateMediaSession(ms));
 Sentinel.subscribe('power',     p => updatePower(p));
 Sentinel.subscribe('system',    s => updateSystem(s));
 Sentinel.subscribe('wifi',      w => updateWifi(w));
 Sentinel.subscribe('bluetooth', b => updateBluetooth(b));
 Sentinel.subscribe('idle',      d => updateIdle(d));
 Sentinel.subscribe('processes', p => updateProcesses(p));
+Sentinel.subscribe('mouse', m => {
+  const prevMouseSnapshot = lastMouseSnapshot;
+  lastMouseSnapshot = m || null;
+  const cursor = (m && m.cursor) || null;
+
+  if (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y)) {
+    // Use per-monitor bounds from the addon host to map absolute cursor
+    // to this monitor's local canvas coordinates. Falls back to virtual
+    // screen normalisation when bounds are not yet available.
+    const mb = Sentinel.monitorBounds;
+    let nx, ny;
+    if (mb) {
+      nx = Math.max(0, Math.min(1, (Number(cursor.x) - mb.left) / Math.max(1, mb.width)));
+      ny = Math.max(0, Math.min(1, (Number(cursor.y) - mb.top) / Math.max(1, mb.height)));
+    } else {
+      const screen = (m && m.screen) || {};
+      const vx = Number(screen.virtual_x) || 0;
+      const vy = Number(screen.virtual_y) || 0;
+      const vw = Number(screen.virtual_width) || Number(screen.primary_width) || 1;
+      const vh = Number(screen.virtual_height) || Number(screen.primary_height) || 1;
+      nx = Math.max(0, Math.min(1, (Number(cursor.x) - vx) / Math.max(1, vw)));
+      ny = Math.max(0, Math.min(1, (Number(cursor.y) - vy) / Math.max(1, vh)));
+    }
+    const moved = !prevMouseSnapshot || !prevMouseSnapshot.cursor
+      ? true
+      : (prevMouseSnapshot.cursor.x !== cursor.x || prevMouseSnapshot.cursor.y !== cursor.y);
+
+    mx = nx;
+    my = ny;
+    if (moved) {
+      moveCount++;
+      ping('move');
+      lastEvent = stamp();
+      const px = mx * W, py = my * H;
+      const last = trails.length ? trails[trails.length - 1] : null;
+      // Distance-throttle: skip points closer than 8px to avoid flooding during fast sweeps
+      if (!last || (px - last.x) * (px - last.x) + (py - last.y) * (py - last.y) > 64) {
+        trails.push({ x: px, y: py, life: 1 });
+        if (trails.length > 50) trails.length = 50;
+      }
+    }
+  }
+
+  const clicked = (m && m.events && Array.isArray(m.events.clicked)) ? m.events.clicked : [];
+  if (clicked.length > 0) {
+    clickCount += clicked.length;
+    ping('click');
+    lastEvent = stamp();
+    for (let i = 0; i < clicked.length; i++) {
+      ripples.push({ x: mx * W, y: my * H, r: 0, life: 1, hue: Math.random() * 40 });
+    }
+  }
+});
+Sentinel.subscribe('keyboard', k => {
+  const next = k && k.toggle_states ? k.toggle_states : {};
+  lastKeyboardSnapshot = k || null;
+
+  activeKeys.clear();
+  const pressed = (k && Array.isArray(k.pressed_keys)) ? k.pressed_keys : [];
+  for (const key of pressed) {
+    activeKeys.add(String(key));
+  }
+  if (pressed.length === 0) {
+    if (next.caps_lock) activeKeys.add('CapsLock');
+    if (next.num_lock) activeKeys.add('NumLock');
+    if (next.scroll_lock) activeKeys.add('ScrollLock');
+    if (next.insert) activeKeys.add('Insert');
+  }
+
+  const down = (k && k.events && Array.isArray(k.events.down)) ? k.events.down : [];
+  const up = (k && k.events && Array.isArray(k.events.up)) ? k.events.up : [];
+
+  for (const key of down) {
+    keyDownCount++;
+    lastKey = String(key);
+    lastEvent = stamp();
+    ping('keydown');
+    addKeyChip(String(key), false);
+    keyBursts.push({ x: W * (.15 + Math.random() * .7), y: H * (.15 + Math.random() * .6), life: 1, hue: Math.random() * 40 });
+  }
+
+  for (const key of up) {
+    keyUpCount++;
+    lastKey = String(key);
+    lastEvent = stamp();
+    ping('keyup');
+    addKeyChip(String(key), true);
+  }
+});
 
 // Displays are in sysdata.displays. Subscribe directly so updates only fire
 // when display data changes (avoids unnecessary 100ms panel re-renders).
@@ -1177,64 +1428,6 @@ Sentinel.on('registry', () => {
 });
 
 // Audio level — feed into AGC line graph + frequency bins + visual reactivity
-Sentinel.on('audio', e => {
-  const raw = Math.max(0, Math.min(1, e.level));
-  audioTarget = Math.max(audioTarget * .7, Math.pow(Math.min(1, raw * 5), .55));
-  ping('audio');
-  pushLevelSample(raw);
-
-  // Synthesize frequency bin targets from single audio level
-  const boosted = Math.pow(Math.min(1, raw * 6), .45); // heavy boost for small values
-  for (let i = 0; i < FREQ_BINS; i++) {
-    const freq = i / FREQ_BINS;
-    const bass   = Math.max(0, 1 - freq * 2.5) * boosted * 1.8;
-    const mid    = Math.max(0, 1 - Math.abs(freq - .35) * 3.5) * boosted * 1.4;
-    const treble = Math.max(0, freq * 2.2 - 1) * boosted * 1.1;
-    const val = Math.min(1, (bass + mid + treble) * (.4 + Math.random() * .6));
-    freqTargets[i] = Math.max(freqTargets[i], val);
-  }
-});
-
-Sentinel.on('move', e => {
-  mx = Number.isFinite(e.nx) ? e.nx : .5;
-  my = Number.isFinite(e.ny) ? e.ny : .5;
-  moveCount++;
-  ping('move');
-  lastEvent = stamp();
-  trails.push({ x: mx * W, y: my * H, life: 1 });
-  while (trails.length > 100) trails.shift();
-});
-
-Sentinel.on('click', e => {
-  const cx = (Number.isFinite(e.nx) ? e.nx : .5) * W;
-  const cy = (Number.isFinite(e.ny) ? e.ny : .5) * H;
-  clickCount++;
-  ping('click');
-  lastEvent = stamp();
-  ripples.push({ x: cx, y: cy, r: 0, life: 1, hue: Math.random() * 40 });
-});
-
-Sentinel.on('keydown', e => {
-  const key = e.key || '?';
-  lastKey = key;
-  lastEvent = stamp();
-  keyDownCount++;
-  activeKeys.add(key);
-  ping('keydown');
-  addKeyChip(key, false);
-  keyBursts.push({ x: W * (.15 + Math.random() * .7), y: H * (.15 + Math.random() * .6), life: 1, hue: Math.random() * 40 });
-});
-
-Sentinel.on('keyup', e => {
-  const key = e.key || '?';
-  lastKey = key;
-  lastEvent = stamp();
-  keyUpCount++;
-  activeKeys.delete(key);
-  ping('keyup');
-  addKeyChip(key, true);
-});
-
 Sentinel.on('pause', () => {
   ping('pause');
   lastEvent = stamp();
@@ -1250,16 +1443,16 @@ Sentinel.on('resume', () => {
 let lastPolledMediaSnapshotKey = '';
 
 setInterval(() => {
-  const latestAudio = Sentinel.get('audio');
-  if (latestAudio && Object.prototype.hasOwnProperty.call(latestAudio, 'media_session')) {
-    const snapshotKey = mediaSessionSnapshotKey(latestAudio.media_session);
+  const latestMedia = Sentinel.get('media');
+  if (latestMedia) {
+    const snapshotKey = mediaSessionSnapshotKey(latestMedia);
     if (snapshotKey !== lastPolledMediaSnapshotKey) {
       lastPolledMediaSnapshotKey = snapshotKey;
-      updateMediaSession(latestAudio);
+      updateMediaSession(latestMedia);
     }
   } else if (lastPolledMediaSnapshotKey !== '') {
     lastPolledMediaSnapshotKey = '';
-    updateMediaSession(latestAudio);
+    updateMediaSession(null);
   }
 
   if (!mediaSessionState.snapshot) return;
@@ -1277,6 +1470,13 @@ function resize() {
   if (viewportChanged || C.width !== W || C.height !== H) {
     C.width = W;
     C.height = H;
+    // Rebuild CRT scanline pattern and invalidate vignette cache on resize
+    const pc = document.createElement('canvas'); pc.width = 1; pc.height = 3;
+    const px = pc.getContext('2d');
+    px.fillStyle = 'rgba(0,0,0,.03)';
+    px.fillRect(0, 0, 1, 1);
+    _scanlinePat = X.createPattern(pc, 'repeat');
+    _vigW = 0; // force vignette rebuild
   }
 
   // Resolution-normalized HUD scaling so panel proportions remain consistent
@@ -1291,8 +1491,8 @@ function resize() {
   // Size both canvases to the same container (they overlap)
   const vp = FC.parentElement;
   if (vp) {
-    const cw = vp.clientWidth - 24;
-    const ch = vp.clientHeight - 38;
+    const cw = vp.clientWidth;
+    const ch = vp.clientHeight;
     if (FC.width !== cw || FC.height !== ch) {
       FC.width = cw;
       FC.height = ch;
@@ -1453,6 +1653,9 @@ function readThemeVars() {
   const bg = _hexRgb(s.getPropertyValue('--bg-color'));
   bgR = bg[0]; bgG = bg[1]; bgB = bg[2];
   if (!bgR && !bgG && !bgB) { bgR = 10; bgG = 4; bgB = 6; } // fallback for missing var
+
+  // Rebuild glow sprites when theme colours change
+  _rebuildSprites();
 }
 
 // Scaled accent "R,G,B" string (all channels scaled uniformly by f)
@@ -1484,16 +1687,14 @@ function drawBG() {
   const spacing = Math.max(20, parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lattice-spacing')) || 80);
   X.strokeStyle = `rgba(${_a(.6)},${(.03 + audio * .015).toFixed(3)})`;
   X.lineWidth = .4;
+  X.beginPath();
   for (let i = -H; i < W + H; i += spacing) {
-    X.beginPath();
-    X.moveTo(i + latticePx, 0 + latticePy);
+    X.moveTo(i + latticePx, latticePy);
     X.lineTo(i + H + latticePx, H + latticePy);
-    X.stroke();
-    X.beginPath();
-    X.moveTo(i + latticePx, 0 + latticePy);
+    X.moveTo(i + latticePx, latticePy);
     X.lineTo(i - H + latticePx, H + latticePy);
-    X.stroke();
   }
+  X.stroke();
 
   // ── Star field with warm tint ──
   for (const s of stars) {
@@ -1577,13 +1778,11 @@ function drawBG() {
     const ex = e.x + parallaxX * .15;
     const ey = e.y + parallaxY * .15;
     const ea = e.brightness * (.12 + audio * .1);
-    // Glow
-    const eg = X.createRadialGradient(ex, ey, 0, ex, ey, e.size * 3);
-    eg.addColorStop(0, `rgba(${emR},${Math.floor(emG * .7 + e.brightness * 80)},${Math.floor(emB * .67 + e.brightness * 40)},${(ea * .8).toFixed(3)})`);
-    eg.addColorStop(.5, `rgba(${_a(1)},${(ea * .3).toFixed(3)})`);
-    eg.addColorStop(1, 'rgba(0,0,0,0)');
-    X.fillStyle = eg;
-    X.beginPath(); X.arc(ex, ey, e.size * 3, 0, Math.PI * 2); X.fill();
+    // Glow — draw pre-rendered sprite instead of per-frame gradient
+    const eRad = e.size * 3;
+    X.globalAlpha = Math.min(1, ea * .8);
+    X.drawImage(_emberSprite, ex - eRad, ey - eRad, eRad * 2, eRad * 2);
+    X.globalAlpha = 1;
     // Core dot
     X.fillStyle = `rgba(${_e(1.18,2.5)},${(ea * 1.5).toFixed(3)})`;
     X.fillRect(ex - .5, ey - .5, 1, 1);
@@ -1603,11 +1802,11 @@ function drawBG() {
     const twinkle = s.brightness + Math.sin(s.t + frame * .0015) * .1;
     const alpha = Math.max(0, twinkle * (.05 + audio * .05));
     const sr = .9 + s.z * 2.1;
-    const fg = X.createRadialGradient(sx, sy, 0, sx, sy, sr * 2.8);
-    fg.addColorStop(0, `rgba(${_a(.9)},${alpha.toFixed(3)})`);
-    fg.addColorStop(1, 'rgba(0,0,0,0)');
-    X.fillStyle = fg;
-    X.beginPath(); X.arc(sx, sy, sr * 2.8, 0, Math.PI * 2); X.fill();
+    // Draw pre-rendered glow sprite instead of per-frame gradient
+    const fgRad = sr * 2.8;
+    X.globalAlpha = Math.min(1, alpha);
+    X.drawImage(_fgSprite, sx - fgRad, sy - fgRad, fgRad * 2, fgRad * 2);
+    X.globalAlpha = 1;
   }
 
   X.globalCompositeOperation = 'source-over';
@@ -1806,29 +2005,50 @@ function drawCore() {
 }
 
 function drawTrailsAndRipples() {
-  // Mouse trails — ember sparks
-  for (let i = trails.length - 1; i >= 0; i--) {
+  // Mouse trails — ember sparks (compact-in-place instead of splice)
+  let tw = 0;
+  for (let i = 0; i < trails.length; i++) {
     const t = trails[i];
     t.life -= .025;
-    if (t.life <= 0) { trails.splice(i, 1); continue; }
-    const tg = X.createRadialGradient(t.x, t.y, 0, t.x, t.y, 4 + (1 - t.life) * 5);
-    tg.addColorStop(0, `rgba(${_e(.94,1.33)},${(t.life * .4).toFixed(3)})`);
-    tg.addColorStop(.4, `rgba(${_a(1)},${(t.life * .15).toFixed(3)})`);
-    tg.addColorStop(1, 'rgba(0,0,0,0)');
-    X.fillStyle = tg;
-    X.beginPath(); X.arc(t.x, t.y, 4 + (1 - t.life) * 5, 0, Math.PI * 2); X.fill();
-    if (i > 0 && trails[i - 1].life > 0) {
-      X.strokeStyle = `rgba(${_a(1.1)},${(t.life * .1).toFixed(3)})`;
-      X.lineWidth = .5;
-      X.beginPath(); X.moveTo(t.x, t.y); X.lineTo(trails[i - 1].x, trails[i - 1].y); X.stroke();
-    }
+    if (t.life > 0) trails[tw++] = t;
   }
-  // Click ripples — diamond expand
-  for (let i = ripples.length - 1; i >= 0; i--) {
+  trails.length = tw;
+
+  // Draw trail glows — single globalAlpha pass to avoid per-point GPU state flushes
+  if (trails.length > 0) {
+    X.globalAlpha = .18;
+    for (let i = 0; i < trails.length; i++) {
+      const t = trails[i];
+      const tRad = 4 + (1 - t.life) * 5;
+      X.drawImage(_trailSprite, t.x - tRad, t.y - tRad, tRad * 2, tRad * 2);
+    }
+    X.globalAlpha = 1;
+  }
+
+  // Draw connecting lines as a single batched path
+  if (trails.length > 1) {
+    X.strokeStyle = `rgba(${_a(1.1)},.07)`;
+    X.lineWidth = .5;
+    X.beginPath();
+    X.moveTo(trails[0].x, trails[0].y);
+    for (let i = 1; i < trails.length; i++) {
+      X.lineTo(trails[i].x, trails[i].y);
+    }
+    X.stroke();
+  }
+
+  // Click ripples — diamond expand (compact-in-place)
+  let rw = 0;
+  for (let i = 0; i < ripples.length; i++) {
     const r = ripples[i];
     r.r += 4;
     r.life -= .015;
-    if (r.life <= 0) { ripples.splice(i, 1); continue; }
+    if (r.life > 0) ripples[rw++] = r;
+  }
+  ripples.length = rw;
+
+  for (let i = 0; i < ripples.length; i++) {
+    const r = ripples[i];
     X.strokeStyle = `rgba(${emR},${Math.floor(emG * .47 + r.hue % 100)},${Math.floor(emB * .67 + r.hue % 60)},${(r.life * .3).toFixed(3)})`;
     X.lineWidth = 1.5;
     X.beginPath();
@@ -1855,7 +2075,9 @@ function drawFrequency() {
   const maxH = ch - 6;
 
   for (let i = 0; i < n; i++) {
-    const v = peakHistory[i];
+    const raw = peakHistory[i];
+    // AGC-normalize: scale so the loudest recent bin fills the graph
+    const v = Math.min(1, raw / freqAgcPeak);
     const bh = Math.max(1, v * maxH);
     const x = gap + i * (bw + gap);
     const y = ch - bh - 3;
@@ -1894,6 +2116,8 @@ function drawFrequency() {
     const y = (ch / 4) * i;
     FX.beginPath(); FX.moveTo(0, y); FX.lineTo(cw, y); FX.stroke();
   }
+
+
 }
 
 /* ─── Audio Level Line Graph with AGC (bottom-right) ─── */
@@ -1933,13 +2157,6 @@ function drawLevel() {
   LX.beginPath(); LX.moveTo(0, peakY); LX.lineTo(cw, peakY); LX.stroke();
   LX.setLineDash([]);
 
-  // Labels
-  LX.font = '8px "Segoe UI", sans-serif';
-  LX.fillStyle = `rgba(${_e(.59,1)},.4)`;
-  LX.fillText('PEAK', 3, peakY + 10);
-  LX.fillStyle = `rgba(${_e(1.06,1.33)},.4)`;
-  LX.fillText('FLOOR', 3, floorY - 4);
-
   if (levelSampleCount < 2) return;
 
   const count = Math.min(levelSampleCount, LEVEL_BUF_LEN);
@@ -1947,12 +2164,23 @@ function drawLevel() {
 
   // Build points array (read from circular buffer, oldest first)
   const points = [];
+  // Smooth visual peak/floor so the graph doesn't stutter when AGC shifts.
+  visualPeak  += (agcPeak  - visualPeak)  * VISUAL_ADJUST_SPEED;
+  visualFloor += (agcFloor - visualFloor) * VISUAL_ADJUST_SPEED;
+  // Headroom is 0.05% of the actual signal range so the line never quite touches the top.
+  const visRange = visualPeak - visualFloor;
+  const headroom = visRange * 0.0005;
+  const drawPeak  = visualPeak + headroom;
+  const drawFloor = visualFloor;
+  const drawRange = drawPeak - drawFloor;
   const startIdx = (levelWriteIdx - count + LEVEL_BUF_LEN) % LEVEL_BUF_LEN;
   for (let i = 0; i < count; i++) {
     const idx = (startIdx + i) % LEVEL_BUF_LEN;
-    const val = levelBuffer[idx];
-    // Map: 0 (anti-peak) → floorY, 1 (peak) → peakY
-    const y = floorY - val * rangeY;
+    const rawVal = levelBuffer[idx];
+    const norm = drawRange > 0.0001
+      ? Math.max(0, Math.min(1, (rawVal - drawFloor) / drawRange))
+      : 0;
+    const y = floorY - norm * rangeY;
     points.push({ x: i * stepX, y });
   }
 
@@ -2032,13 +2260,28 @@ function drawLevel() {
     LX.beginPath(); LX.arc(last.x, last.y, 6, 0, Math.PI * 2); LX.fill();
   }
 
-  // AGC info overlay
+  // AGC info overlay — all four corners in dB
+  // Convert linear 0-1 to dB (clamp to -80dB minimum)
+  const _todB = v => v > 0 ? Math.max(-80, 20 * Math.log10(v)) : -80;
+  const linePeakdB  = _todB(agcPeak).toFixed(1);
+  const lineFloordB = _todB(agcFloor).toFixed(1);
+  const freqPeakdB  = _todB(freqAgcPeak).toFixed(1);
+  const freqFloordB = _todB(freqAgcFloor).toFixed(1);
   LX.font = '8px "Segoe UI", sans-serif';
-  LX.fillStyle = `rgba(${_e(.88,2)},.5)`;
+  // Top-right: Line AGC Peak
   LX.textAlign = 'right';
-  LX.fillText(`AGC Peak: ${(agcPeak * 100).toFixed(1)}%`, cw - 4, 12);
-  LX.fillText(`AGC Floor: ${(agcFloor * 100).toFixed(1)}%`, cw - 4, 22);
+  LX.fillStyle = 'rgba(255,255,255,.45)';
+  LX.fillText(`Line Peak: ${linePeakdB} dB`, cw - 4, 12);
+  // Bottom-right: Line AGC Floor
+  LX.fillStyle = 'rgba(255,255,255,.35)';
+  LX.fillText(`Line Floor: ${lineFloordB} dB`, cw - 4, ch - 4);
+  // Top-left: Freq AGC Peak
   LX.textAlign = 'left';
+  LX.fillStyle = 'rgba(255,255,255,.45)';
+  LX.fillText(`Freq Peak: ${freqPeakdB} dB`, 4, 12);
+  // Bottom-left: Freq AGC Floor
+  LX.fillStyle = 'rgba(255,255,255,.35)';
+  LX.fillText(`Freq Floor: ${freqFloordB} dB`, 4, ch - 4);
 }
 
 /* ═══════════════ MAIN LOOP ═══════════════ */
@@ -2053,11 +2296,62 @@ function loop(now) {
     audio += (audioTarget - audio) * .11;
     audioTarget *= .91;
 
-    // Smooth frequency bins toward targets + decay
+    // Smooth frequency bins toward targets + decay (backend pre-smooths via EMA)
+    // Also update frequency AGC peak from the loudest bin.
+    let curMaxBin = 0;
     for (let i = 0; i < FREQ_BINS; i++) {
-      peakHistory[i] += (freqTargets[i] - peakHistory[i]) * .25;
-      freqTargets[i] *= .92;
+      peakHistory[i] += (freqTargets[i] - peakHistory[i]) * .45;
+      freqTargets[i] *= .88;
+      if (peakHistory[i] > curMaxBin) curMaxBin = peakHistory[i];
     }
+    // Frequency AGC: rolling-max with hold (mirrors audio level peak tracking)
+    const fnow = performance.now();
+    freqAgcMaxHistory.push({ t: fnow, v: curMaxBin });
+    const fCutoff = fnow - FREQ_AGC_HOLD_SEC * 1000;
+    while (freqAgcMaxHistory.length > 0 && freqAgcMaxHistory[0].t < fCutoff) freqAgcMaxHistory.shift();
+    let fWindowMax = 0;
+    let fWindowMaxTime = fnow;
+    for (let j = 0; j < freqAgcMaxHistory.length; j++) {
+      if (freqAgcMaxHistory[j].v > fWindowMax) {
+        fWindowMax = freqAgcMaxHistory[j].v;
+        fWindowMaxTime = freqAgcMaxHistory[j].t;
+      }
+    }
+    if (fWindowMax >= freqAgcPeak) {
+      freqAgcPeak = fWindowMax;
+      freqAgcLastMaxTime = fWindowMaxTime;
+    } else if (fnow - freqAgcLastMaxTime >= FREQ_AGC_HOLD_SEC * 1000) {
+      freqAgcPeak += (fWindowMax - freqAgcPeak) * FREQ_AGC_RELEASE;
+    }
+    freqAgcPeak = Math.max(freqAgcPeak, 0.001);
+
+    // Frequency AGC floor: rolling-min with hold
+    // Use the minimum bin value (quietest active bin)
+    let curMinBin = Infinity;
+    for (let i = 0; i < FREQ_BINS; i++) {
+      if (peakHistory[i] < curMinBin) curMinBin = peakHistory[i];
+    }
+    if (!isFinite(curMinBin)) curMinBin = 0;
+    freqAgcMinHistory.push({ t: fnow, v: curMinBin });
+    const fFloorCutoff = fnow - FREQ_AGC_FLOOR_HOLD_SEC * 1000;
+    while (freqAgcMinHistory.length > 0 && freqAgcMinHistory[0].t < fFloorCutoff) freqAgcMinHistory.shift();
+    let fWindowMin = Infinity;
+    let fWindowMinTime = fnow;
+    for (let j = 0; j < freqAgcMinHistory.length; j++) {
+      if (freqAgcMinHistory[j].v < fWindowMin) {
+        fWindowMin = freqAgcMinHistory[j].v;
+        fWindowMinTime = freqAgcMinHistory[j].t;
+      }
+    }
+    if (!isFinite(fWindowMin)) fWindowMin = 0;
+    if (fWindowMin <= freqAgcFloor) {
+      freqAgcFloor = fWindowMin;
+      freqAgcLastMinTime = fWindowMinTime;
+    } else if (fnow - freqAgcLastMinTime >= FREQ_AGC_FLOOR_HOLD_SEC * 1000) {
+      freqAgcFloor += (fWindowMin - freqAgcFloor) * FREQ_AGC_RELEASE;
+    }
+    freqAgcFloor = Math.min(freqAgcFloor, freqAgcPeak - 0.0005);
+    freqAgcFloor = Math.max(freqAgcFloor, 0);
   }
 
   // Accessibility + responsiveness split:
@@ -2082,18 +2376,18 @@ function loop(now) {
   X.fillRect(0, 0, W, H);
   X.globalCompositeOperation = 'source-over';
 
-  // CRT scan lines (subtle)
-  X.fillStyle = 'rgba(0,0,0,.03)';
-  for (let y = 0; y < H; y += 3) {
-    X.fillRect(0, y, W, 1);
-  }
+  // CRT scan lines (subtle) — single pattern fill instead of per-row rects
+  if (_scanlinePat) { X.fillStyle = _scanlinePat; X.fillRect(0, 0, W, H); }
 
-  // Vignette (stronger, more cinematic)
-  const vig = X.createRadialGradient(W * .5, H * .46, Math.min(W, H) * .15, W * .5, H * .46, Math.max(W, H) * .85);
-  vig.addColorStop(0, 'rgba(0,0,0,0)');
-  vig.addColorStop(.6, 'rgba(0,0,0,.15)');
-  vig.addColorStop(1, 'rgba(0,0,0,.65)');
-  X.fillStyle = vig;
+  // Vignette (cached — recreate only on resize)
+  if (_vigW !== W || _vigH !== H) {
+    _vigGrad = X.createRadialGradient(W * .5, H * .46, Math.min(W, H) * .15, W * .5, H * .46, Math.max(W, H) * .85);
+    _vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    _vigGrad.addColorStop(.6, 'rgba(0,0,0,.15)');
+    _vigGrad.addColorStop(1, 'rgba(0,0,0,.65)');
+    _vigW = W; _vigH = H;
+  }
+  X.fillStyle = _vigGrad;
   X.fillRect(0, 0, W, H);
 
   // HUD updates
@@ -2113,10 +2407,13 @@ function loop(now) {
 Sentinel.subscribe('time', t => {
   const parts = [];
   if (t.hour != null && t.minute != null) {
-    const h = String(t.hour).padStart(2, '0');
+    const h12 = t.hour_12 != null ? t.hour_12 : ((t.hour % 12) || 12);
+    const h = String(h12).padStart(2, '0');
     const m = String(t.minute).padStart(2, '0');
     const s = t.second != null ? ':' + String(t.second).padStart(2, '0') : '';
-    parts.push(h + ':' + m + s);
+    const ms = t.millisecond != null ? '.' + String(t.millisecond).padStart(3, '0') : '';
+    const ampm = t.am_pm || (t.hour < 12 ? 'AM' : 'PM');
+    parts.push(h + ':' + m + s + ms + ' ' + ampm);
   }
   if (t.date_formatted) {
     parts.push(t.date_formatted);
