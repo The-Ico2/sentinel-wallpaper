@@ -37,6 +37,42 @@
   --panel-bg-opacity: 0.06;
   --viz-min-height: 100;
   --lattice-spacing: 80;
+
+  /* ── Granular color overrides ── */
+  --heading-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.75);
+  --label-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.8);
+  --value-color: var(--text-color);
+  --clock-color: var(--text-color);
+  --hint-color: rgba(var(--accent-r), calc(var(--accent-g) * 3.2), calc(var(--accent-b) * 3.75), 0.7);
+  --status-pill-color: var(--text-color);
+  --bar-fill-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.8);
+  --bar-track-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
+  --cap-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.7);
+  --cap-active-color: var(--text-color);
+  --cap-dot-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.88);
+  --chip-border-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.4);
+  --chip-text-color: var(--text-color);
+  --media-title-color: var(--text-color);
+  --media-artist-color: var(--text-color);
+  --media-album-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.55);
+  --media-status-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.6);
+  --media-progress-start: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.6);
+  --media-progress-end: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.75);
+  --media-chip-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.6);
+  --media-active-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.9);
+  --media-time-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.5);
+  --media-idle-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.4);
+
+  /* ── Per-component bar colors ── */
+  --cpu-bar-color: rgba(220, 70, 50, 0.8);
+  --gpu-bar-color: rgba(220, 110, 70, 0.8);
+  --vram-bar-color: rgba(180, 120, 255, 0.7);
+  --ram-bar-color: rgba(200, 80, 60, 0.8);
+  --storage-bar-color: rgba(240, 150, 70, 0.78);
+  --storage-pool-bar-color: rgba(240, 170, 90, 0.7);
+  --audio-bar-color: rgba(255, 140, 60, 0.8);
+  --battery-bar-color: rgba(100, 200, 120, 0.8);
+  --wifi-bar-color: rgba(80, 180, 255, 0.75);
 }
 
 * {
@@ -91,7 +127,7 @@ canvas{
 
 .top .time {
   font-size: calc(var(--font-size) * 1px);
-  color: var(--text-color);
+  color: var(--clock-color);
   opacity: 0.85;
   letter-spacing: 0.08em;
   font-variant-numeric: tabular-nums;
@@ -113,7 +149,7 @@ canvas{
   font-size: 10.5px;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.75);
+  color: var(--heading-color);
   margin-bottom: 3px;
 }
 
@@ -125,11 +161,11 @@ canvas{
 }
 
 .lbl {
-  color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.8);
+  color: var(--label-color);
 }
 
 .val {
-  color: var(--text-color);
+  color: var(--value-color);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -137,7 +173,7 @@ canvas{
 /* progress bars */
 .bar-wrap {
   height: 4px;
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
+  background: var(--bar-track-color);
   border-radius: 3px;
   margin: 2px 0 3px;
   overflow: hidden;
@@ -191,7 +227,7 @@ canvas{
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 4px 6px;
-  color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.7);
+  color: var(--cap-color);
   background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.05);
   display: flex;
   justify-content: space-between;
@@ -207,13 +243,13 @@ canvas{
 }
 
 .cap.on {
-  color: var(--text-color);
+  color: var(--cap-active-color);
   border-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.4);
   background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.12);
 }
 
 .cap.on .dot {
-  background: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.88);
+  background: var(--cap-dot-color);
   box-shadow: 0 0 8px rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.6);
 }
 
@@ -228,9 +264,9 @@ canvas{
 }
 
 .chip {
-  border: 1px solid rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.4);
+  border: 1px solid var(--chip-border-color);
   background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.15);
-  color: var(--text-color);
+  color: var(--chip-text-color);
   border-radius: 6px;
   font-size: 10px;
   padding: 3px 6px;
@@ -291,15 +327,209 @@ canvas{
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-color);
+  color: var(--status-pill-color);
   opacity: 0.85;
 }
 
 .hint {
   font-size: 10px;
   letter-spacing: 0.06em;
-  color: rgba(var(--accent-r), calc(var(--accent-g) * 3.2), calc(var(--accent-b) * 3.75), 0.7);
+  color: var(--hint-color);
   text-transform: uppercase;
+}
+
+/* ─── Media Player Panel ─── */
+#mediaPanel {
+  padding: 0;
+  overflow: visible;
+  flex-shrink: 0;
+}
+#mediaPanel h2 {
+  display: none; /* header replaced by inline layout */
+}
+
+.media-player {
+  position: relative;
+}
+
+/* Hero: album art + track info side by side */
+.media-hero {
+  display: flex;
+  gap: 10px;
+  padding: calc(var(--panel-padding-y) * 1px) calc(var(--panel-padding-x) * 1px);
+  padding-bottom: 6px;
+  align-items: flex-start;
+}
+
+.media-art {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.08);
+}
+
+.media-art-placeholder {
+  width: 52px;
+  height: 52px;
+  min-width: 52px;
+  border-radius: 6px;
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.15);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-art-placeholder svg {
+  width: 22px;
+  height: 22px;
+  opacity: 0.25;
+}
+
+.media-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.media-title {
+  font-size: calc(var(--font-size) * 1px + 1px);
+  color: var(--media-title-color);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.media-artist {
+  font-size: calc(var(--font-size) * 1px);
+  color: var(--media-artist-color);
+  opacity: 0.8;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+  min-height: 1em;
+}
+
+.media-album {
+  font-size: calc(var(--font-size) * 1px - 2px);
+  color: var(--media-album-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+/* Status badge */
+.media-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.media-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.35);
+  flex-shrink: 0;
+}
+
+.media-status-dot.playing {
+  background: var(--media-active-color);
+  box-shadow: 0 0 6px rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.5);
+  animation: media-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes media-pulse {
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.4; }
+}
+
+.media-status-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--media-status-color);
+}
+
+/* Progress track */
+.media-progress {
+  padding: 0 calc(var(--panel-padding-x) * 1px);
+}
+
+.media-progress-bar {
+  height: 3px;
+  background: var(--bar-track-color);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.media-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--media-progress-start), var(--media-progress-end));
+  transition: width 0.15s linear;
+}
+
+.media-time {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--media-time-color);
+  margin-top: 2px;
+  letter-spacing: 0.03em;
+}
+
+/* Meta chips row */
+.media-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px calc(var(--panel-padding-x) * 1px) calc(var(--panel-padding-y) * 1px);
+}
+
+.media-chip {
+  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.15);
+  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
+  border-radius: 4px;
+  font-size: 9px;
+  padding: 2px 6px;
+  letter-spacing: 0.04em;
+  color: var(--media-chip-color);
+}
+
+.media-chip.active {
+  border-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.3);
+  color: var(--media-active-color);
+}
+
+/* Idle / nothing playing state */
+.media-idle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px calc(var(--panel-padding-x) * 1px);
+  color: var(--media-idle-color);
+  font-size: calc(var(--font-size) * 1px - 1px);
+  letter-spacing: 0.06em;
+}
+
+.media-idle svg {
+  width: 16px;
+  height: 16px;
+  opacity: 0.35;
 }
 </style>
 </head>
@@ -377,13 +607,9 @@ canvas{
       <h2>Idle</h2>
       <div id="idleInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
     </div> -->
-    <div class="pnl" id="displayPanel">
-      <h2>Displays</h2>
-      <div id="displayInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
     <div class="pnl" id="mediaPanel">
       <h2>Media Session</h2>
-      <div id="mediaInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
+      <div id="mediaInfo" class="media-player"></div>
     </div>
     <div class="vizPanel" id="vizPanel">
       <canvas id="freqCanvas"></canvas>
@@ -688,8 +914,7 @@ const panelLayoutDefs = [
   { key: 'audio',       id: 'audioPanel',   column: 2, order: 4  },
   { key: 'wifi',        id: 'wifiPanel',    column: 2, order: 5  },
   { key: 'bluetooth',   id: 'btPanel',      column: 2, order: 6  },
-  { key: 'displays',    id: 'displayPanel', column: 2, order: 7  },
-  { key: 'media',       id: 'mediaPanel',   column: 2, order: 8  },
+  { key: 'media',       id: 'mediaPanel',   column: 2, order: 7  },
   { key: 'viz',         id: 'vizPanel',     column: 2, order: 9  },
 ];
 let lastPanelLayoutSignature = '';
@@ -768,7 +993,7 @@ function updateCPU(c) {
     <div class="row"><span class="lbl">Model</span><span class="val">${c.brand || '—'}</span></div>
     <div class="row"><span class="lbl">Cores</span><span class="val">${c.logical_cores || '—'}</span></div>
     <div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>
-    ${barHTML(usage, 100, 'rgba(220,70,50,.8)')}
+    ${barHTML(usage, 100, 'var(--cpu-bar-color)')}
     <div class="row"><span class="lbl">Frequency</span><span class="val">${c.frequency_mhz ? c.frequency_mhz + ' MHz' : '—'}</span></div>
     <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(c.temperature)}</span></div>
   `;
@@ -806,13 +1031,13 @@ function updateGPU(g) {
 
   if (usage != null) {
     html += `<div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>`;
-    html += barHTML(usage, 100, 'rgba(220,110,70,.8)');
+    html += barHTML(usage, 100, 'var(--gpu-bar-color)');
   }
   if (vramUsedMb != null && vramTotalMb != null) {
     const usedBytes = vramUsedMb * 1024 * 1024;
     const totalBytes = vramTotalMb * 1024 * 1024;
     html += `<div class="row"><span class="lbl">VRAM Used</span><span class="val">${fmtBytes(usedBytes)} / ${fmtBytes(totalBytes)}</span></div>`;
-    html += barHTML(vramUsedMb, Math.max(vramTotalMb, 1), 'rgba(180,120,255,.7)');
+    html += barHTML(vramUsedMb, Math.max(vramTotalMb, 1), 'var(--vram-bar-color)');
   }
   html += `
     <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(tempC)}</span></div>
@@ -832,7 +1057,7 @@ function updateRAM(r) {
     <div class="row"><span class="lbl">Used</span><span class="val">${fmtBytes(r.used_bytes)}</span></div>
     <div class="row"><span class="lbl">Available</span><span class="val">${fmtBytes(r.available_bytes)}</span></div>
     <div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>
-    ${barHTML(usage, 100, 'rgba(200,80,60,.8)')}
+    ${barHTML(usage, 100, 'var(--ram-bar-color)')}
     <div class="row"><span class="lbl">Swap</span><span class="val">${fmtBytes(r.swap_used_bytes)} / ${fmtBytes(r.swap_total_bytes)}</span></div>
   `;
 }
@@ -844,13 +1069,13 @@ function updateStorage(s) {
   let html = `
     <div class="row"><span class="lbl">Total</span><span class="val">${fmtBytes(s.total_bytes)}</span></div>
     <div class="row"><span class="lbl">Used</span><span class="val">${fmtBytes(s.used_bytes)}</span></div>
-    ${barHTML(s.used_bytes || 0, s.total_bytes || 1, 'rgba(240,150,70,.78)')}
+    ${barHTML(s.used_bytes || 0, s.total_bytes || 1, 'var(--storage-bar-color)')}
   `;
   for (const d of disks.slice(0, 3)) {
     const label = d.mount || d.name || '?';
     const pUsed = d.total_bytes > 0 ? ((d.used_bytes / d.total_bytes) * 100) : 0;
     html += `<div class="row"><span class="lbl">${label}</span><span class="val">${fmtBytes(d.used_bytes)} / ${fmtBytes(d.total_bytes)}</span></div>`;
-    html += barHTML(pUsed, 100, 'rgba(240,170,90,.7)');
+    html += barHTML(pUsed, 100, 'var(--storage-pool-bar-color)');
   }
   el.innerHTML = html;
 }
@@ -877,7 +1102,7 @@ function updateAudioStats(a) {
     <div class="row"><span class="lbl">Muted</span><span class="val">${out.muted ? 'Yes' : 'No'}</span></div>
     <div class="row"><span class="lbl">Peak</span><span class="val">${lvl.peak != null ? (lvl.peak * 100).toFixed(1) + '%' : '—'}</span></div>
     <div class="row"><span class="lbl">RMS</span><span class="val">${lvl.rms != null ? (lvl.rms * 100).toFixed(1) + '%' : '—'}</span></div>
-    ${barHTML((lvl.smoothed_peak || 0) * 100, 100, 'rgba(255,140,60,.8)')}
+    ${barHTML((lvl.smoothed_peak || 0) * 100, 100, 'var(--audio-bar-color)')}
   `;
 }
 
@@ -926,7 +1151,7 @@ function updatePower(p) {
   let html = '';
   if (pct_val != null) {
     html += `<div class="row"><span class="lbl">Battery</span><span class="val">${pct_val.toFixed(0)}%</span></div>`;
-    html += barHTML(pct_val, 100, 'rgba(100,200,120,.8)');
+    html += barHTML(pct_val, 100, 'var(--battery-bar-color)');
   } else if (hasBattery) {
     html += `<div class="row"><span class="lbl">Battery</span><span class="val">Unknown</span></div>`;
   } else {
@@ -990,7 +1215,7 @@ function updateWifi(w) {
     html += `<div class="row"><span class="lbl">SSID</span><span class="val">${ssid}</span></div>`;
     if (signal != null) {
       html += `<div class="row"><span class="lbl">Signal</span><span class="val">${signal}%</span></div>`;
-      html += barHTML(signal, 100, 'rgba(80,180,255,.75)');
+      html += barHTML(signal, 100, 'var(--wifi-bar-color)');
     }
     if (band) html += `<div class="row"><span class="lbl">Band</span><span class="val">${band}</span></div>`;
     if (channel != null) html += `<div class="row"><span class="lbl">Channel</span><span class="val">${channel}</span></div>`;
@@ -1054,30 +1279,6 @@ function updateIdle(d) {
     <div class="row"><span class="lbl">Idle Time</span><span class="val">${sec != null ? fmtUptime(sec) : '—'}</span></div>
     <div class="row"><span class="lbl">Is Idle</span><span class="val">${d.is_idle === true ? 'Yes' : 'No'}</span></div>
   `;
-}
-
-/* ─── Displays panel ─── */
-function updateDisplays(monitors) {
-  const el = document.getElementById('displayInfo');
-  if (!monitors || !monitors.length) {
-    el.innerHTML = `<div class="row"><span class="lbl">No display data</span></div>`;
-    return;
-  }
-  let html = `<div class="row"><span class="lbl">Monitors</span><span class="val">${monitors.length}</span></div>`;
-  for (const m of monitors.slice(0, 4)) {
-    const meta = (m && typeof m === 'object' && m.metadata) ? m.metadata : m;
-    const label = meta.primary ? '★ Primary' : (meta.monitor_name || meta.device_name || 'Display');
-    const width = meta.width ?? (meta.size && meta.size.width);
-    const height = meta.height ?? (meta.size && meta.size.height);
-    const hzVal = meta.refresh_rate_hz ?? meta.hz;
-    const res = `${width || '?'}×${height || '?'}`;
-    const hz = hzVal ? ` @ ${hzVal}Hz` : '';
-    html += `<div class="row"><span class="lbl">${label}</span><span class="val">${res}${hz}</span></div>`;
-    if (meta.scale && meta.scale !== 1) {
-      html += `<div class="row"><span class="lbl" style="padding-left:8px">Scale</span><span class="val">${(meta.scale * 100).toFixed(0)}%</span></div>`;
-    }
-  }
-  el.innerHTML = html;
 }
 
 /* ─── Processes panel ─── */
@@ -1206,25 +1407,66 @@ function renderMediaSession(ms) {
   const el = document.getElementById('mediaInfo');
   if (!el) return;
 
+  /* ── Nothing playing ── */
   if (!ms || (ms.playing === false && !ms.title)) {
-    el.innerHTML = `<div class="row"><span class="lbl">Nothing playing</span></div>`;
+    el.innerHTML = `<div class="media-idle">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/></svg>
+      <span>Nothing playing</span>
+    </div>`;
     return;
   }
 
   const status = ms.playback_status || (ms.playing ? 'playing' : 'stopped');
-  let html = `<div class="row"><span class="lbl">Status</span><span class="val">${status}</span></div>`;
-  if (ms.title) html += `<div class="row"><span class="lbl">Title</span><span class="val">${ms.title}</span></div>`;
-  if (ms.artist) html += `<div class="row"><span class="lbl">Artist</span><span class="val">${ms.artist}</span></div>`;
-  if (ms.album) html += `<div class="row"><span class="lbl">Album</span><span class="val">${ms.album}</span></div>`;
+  const isPlaying = status.toLowerCase() === 'playing';
+
+  /* ── Album art ── */
+  const artHTML = ms.thumbnail
+    ? `<img class="media-art" src="${ms.thumbnail}" alt="">`
+    : `<div class="media-art-placeholder"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/></svg></div>`;
+
+  /* ── Track info ── */
+  let infoHTML = '';
+  if (ms.title)  infoHTML += `<div class="media-title">${ms.title}</div>`;
+  const artistText = ms.artist || ms.album_artist || '';
+  if (artistText) infoHTML += `<div class="media-artist">${artistText}</div>`;
+  if (ms.album && ms.album !== artistText) infoHTML += `<div class="media-album">${ms.album}</div>`;
+  infoHTML += `<div class="media-status">
+    <span class="media-status-dot${isPlaying ? ' playing' : ''}"></span>
+    <span class="media-status-label">${status}</span>
+  </div>`;
+
+  /* ── Progress bar ── */
+  let progressHTML = '';
   if (ms.timeline && ms.timeline.duration_ms > 0) {
     const pos = ms.timeline.position_ms || 0;
     const dur = ms.timeline.duration_ms;
-    html += `<div class="row"><span class="lbl">Progress</span><span class="val">${fmtTimeMs(pos)} / ${fmtTimeMs(dur)}</span></div>`;
-    html += barHTML(pos, dur, 'rgba(180,120,255,.7)');
+    const pct = Math.min(100, (pos / dur) * 100);
+    progressHTML = `<div class="media-progress">
+      <div class="media-progress-bar"><div class="media-progress-fill" style="width:${pct.toFixed(1)}%"></div></div>
+      <div class="media-time"><span>${fmtTimeMs(pos)}</span><span>${fmtTimeMs(dur)}</span></div>
+    </div>`;
   }
-  if (ms.shuffle === true) html += `<div class="row"><span class="lbl">Shuffle</span><span class="val">On</span></div>`;
-  if (ms.repeat_mode && ms.repeat_mode !== 'none') html += `<div class="row"><span class="lbl">Repeat</span><span class="val">${ms.repeat_mode}</span></div>`;
-  el.innerHTML = html;
+
+  /* ── Meta chips ── */
+  const chips = [];
+  if (ms.source_app_id) {
+    const app = ms.source_app_id.replace(/\.exe$/i, '');
+    chips.push(`<span class="media-chip">${app}</span>`);
+  }
+  if (ms.playback_type && ms.playback_type !== 'unknown')
+    chips.push(`<span class="media-chip">${ms.playback_type}</span>`);
+  if (ms.shuffle === true)
+    chips.push(`<span class="media-chip active">shuffle</span>`);
+  if (ms.repeat_mode && ms.repeat_mode !== 'none')
+    chips.push(`<span class="media-chip active">repeat ${ms.repeat_mode}</span>`);
+  if (ms.genres && ms.genres.length)
+    chips.push(`<span class="media-chip">${ms.genres.join(', ')}</span>`);
+  if (ms.track_number)
+    chips.push(`<span class="media-chip">Track ${ms.track_number}${ms.album_track_count ? '/' + ms.album_track_count : ''}</span>`);
+  const metaHTML = chips.length ? `<div class="media-meta">${chips.join('')}</div>` : '';
+
+  /* ── Assemble ── */
+  el.innerHTML = `<div class="media-hero">${artHTML}<div class="media-info">${infoHTML}</div></div>${progressHTML}${metaHTML}`;
 }
 
 /* ─── Media session (via Sentinel.subscribe('media')) ─── */
@@ -1333,23 +1575,17 @@ Sentinel.subscribe('mouse', m => {
   const cursor = (m && m.cursor) || null;
 
   if (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y)) {
-    // Use per-monitor bounds from the addon host to map absolute cursor
-    // to this monitor's local canvas coordinates. Falls back to virtual
-    // screen normalisation when bounds are not yet available.
+    // Map absolute desktop-pixel cursor to this monitor's 0–1 local space.
+    // monitorBounds is injected by the wallpaper addon on every tick BEFORE
+    // registry data, so it is always available by the time this fires.
+    // If somehow missing, skip cursor update entirely — the virtual-screen
+    // fallback would produce wrong coordinates on non-primary monitors.
     const mb = Sentinel.monitorBounds;
-    let nx, ny;
-    if (mb) {
-      nx = Math.max(0, Math.min(1, (Number(cursor.x) - mb.left) / Math.max(1, mb.width)));
-      ny = Math.max(0, Math.min(1, (Number(cursor.y) - mb.top) / Math.max(1, mb.height)));
-    } else {
-      const screen = (m && m.screen) || {};
-      const vx = Number(screen.virtual_x) || 0;
-      const vy = Number(screen.virtual_y) || 0;
-      const vw = Number(screen.virtual_width) || Number(screen.primary_width) || 1;
-      const vh = Number(screen.virtual_height) || Number(screen.primary_height) || 1;
-      nx = Math.max(0, Math.min(1, (Number(cursor.x) - vx) / Math.max(1, vw)));
-      ny = Math.max(0, Math.min(1, (Number(cursor.y) - vy) / Math.max(1, vh)));
-    }
+    if (!mb) return;   // bounds not yet received; wait for next tick
+
+    const nx = Math.max(0, Math.min(1, (Number(cursor.x) - mb.left) / Math.max(1, mb.width)));
+    const ny = Math.max(0, Math.min(1, (Number(cursor.y) - mb.top) / Math.max(1, mb.height)));
+
     const moved = !prevMouseSnapshot || !prevMouseSnapshot.cursor
       ? true
       : (prevMouseSnapshot.cursor.x !== cursor.x || prevMouseSnapshot.cursor.y !== cursor.y);
@@ -1415,12 +1651,6 @@ Sentinel.subscribe('keyboard', k => {
     ping('keyup');
     addKeyChip(String(key), true);
   }
-});
-
-// Displays are in sysdata.displays. Subscribe directly so updates only fire
-// when display data changes (avoids unnecessary 100ms panel re-renders).
-Sentinel.subscribe('displays', disp => {
-  updateDisplays(Array.isArray(disp) ? disp : (disp && disp.monitors) || []);
 });
 
 Sentinel.on('registry', () => {

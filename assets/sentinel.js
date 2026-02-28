@@ -311,14 +311,17 @@
     get appdata() { return _appdata; },
 
     /**
-     * Latest media session data (extracted from audio.media_session).
+     * Latest media session data.
+     * Prefers the dedicated sysdata.media entry; falls back to audio.media_session.
      * Contains: playing, title, artist, album, timeline, playback_status, etc.
      * Returns null if no media data is available.
      * @returns {object|null}
      */
     get media() {
-      if (!_sysdata || !_sysdata.audio) return null;
-      return _sysdata.audio.media_session || null;
+      if (!_sysdata) return null;
+      if (_sysdata.media) return _sysdata.media;
+      if (_sysdata.audio && _sysdata.audio.media_session) return _sysdata.audio.media_session;
+      return null;
     },
 
     /**

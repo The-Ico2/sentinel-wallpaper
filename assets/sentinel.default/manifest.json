@@ -253,6 +253,177 @@
       "selector": "color-picker",
       "value": "#ffffff",
       "variable": "--text-color"
+    },
+    "uiColors": {
+      "name": "UI Colors",
+      "description": "Fine-tune individual text and element colors across the HUD.",
+      "headingColor": {
+        "selector": "color-picker",
+        "value": "#982520",
+        "variable": "--heading-color"
+      },
+      "labelColor": {
+        "selector": "color-picker",
+        "value": "#A8807A",
+        "variable": "--label-color"
+      },
+      "valueColor": {
+        "selector": "color-picker",
+        "value": "#ffe4d8",
+        "variable": "--value-color"
+      },
+      "clockColor": {
+        "selector": "color-picker",
+        "value": "#ffe4d8",
+        "variable": "--clock-color"
+      },
+      "hintColor": {
+        "selector": "color-picker",
+        "value": "#8C7068",
+        "variable": "--hint-color"
+      },
+      "statusPillColor": {
+        "selector": "color-picker",
+        "value": "#ffe4d8",
+        "variable": "--status-pill-color"
+      }
+    },
+    "capChipColors": {
+      "name": "Capability & Chip Colors",
+      "description": "Colors for capability signals, key chips, and status indicators.",
+      "capColor": {
+        "selector": "color-picker",
+        "value": "#8C6962",
+        "variable": "--cap-color"
+      },
+      "capActiveColor": {
+        "selector": "color-picker",
+        "value": "#ffe4d8",
+        "variable": "--cap-active-color"
+      },
+      "capDotColor": {
+        "selector": "color-picker",
+        "value": "#E09534",
+        "variable": "--cap-dot-color"
+      },
+      "chipBorderColor": {
+        "selector": "color-picker",
+        "value": "#664418",
+        "variable": "--chip-border-color"
+      },
+      "chipTextColor": {
+        "selector": "color-picker",
+        "value": "#ffe4d8",
+        "variable": "--chip-text-color"
+      }
+    },
+    "barColors": {
+      "name": "Bar Colors",
+      "description": "Customize the color of every progress bar and their shared track.",
+      "barTrackColor": {
+        "selector": "color-picker",
+        "value": "#1A0806",
+        "variable": "--bar-track-color"
+      },
+      "cpuBarColor": {
+        "selector": "color-picker",
+        "value": "#DC4632",
+        "variable": "--cpu-bar-color"
+      },
+      "gpuBarColor": {
+        "selector": "color-picker",
+        "value": "#DC6E46",
+        "variable": "--gpu-bar-color"
+      },
+      "vramBarColor": {
+        "selector": "color-picker",
+        "value": "#B478FF",
+        "variable": "--vram-bar-color"
+      },
+      "ramBarColor": {
+        "selector": "color-picker",
+        "value": "#C85032",
+        "variable": "--ram-bar-color"
+      },
+      "storageBarColor": {
+        "selector": "color-picker",
+        "value": "#F09646",
+        "variable": "--storage-bar-color"
+      },
+      "storagePoolBarColor": {
+        "selector": "color-picker",
+        "value": "#F0AA5A",
+        "variable": "--storage-pool-bar-color"
+      },
+      "audioBarColor": {
+        "selector": "color-picker",
+        "value": "#FF8C3C",
+        "variable": "--audio-bar-color"
+      },
+      "batteryBarColor": {
+        "selector": "color-picker",
+        "value": "#64C878",
+        "variable": "--battery-bar-color"
+      },
+      "wifiBarColor": {
+        "selector": "color-picker",
+        "value": "#50B4FF",
+        "variable": "--wifi-bar-color"
+      }
+    },
+    "mediaColors": {
+      "name": "Media Colors",
+      "description": "Per-element color control for the media / now-playing panel.",
+      "mediaTitleColor": {
+        "selector": "color-picker",
+        "value": "#ffe4d8",
+        "variable": "--media-title-color"
+      },
+      "mediaArtistColor": {
+        "selector": "color-picker",
+        "value": "#ffe4d8",
+        "variable": "--media-artist-color"
+      },
+      "mediaAlbumColor": {
+        "selector": "color-picker",
+        "value": "#6E5349",
+        "variable": "--media-album-color"
+      },
+      "mediaStatusColor": {
+        "selector": "color-picker",
+        "value": "#785A54",
+        "variable": "--media-status-color"
+      },
+      "mediaProgressStart": {
+        "selector": "color-picker",
+        "value": "#781E18",
+        "variable": "--media-progress-start"
+      },
+      "mediaProgressEnd": {
+        "selector": "color-picker",
+        "value": "#BF7F2D",
+        "variable": "--media-progress-end"
+      },
+      "mediaChipColor": {
+        "selector": "color-picker",
+        "value": "#785A54",
+        "variable": "--media-chip-color"
+      },
+      "mediaActiveColor": {
+        "selector": "color-picker",
+        "value": "#E69936",
+        "variable": "--media-active-color"
+      },
+      "mediaTimeColor": {
+        "selector": "color-picker",
+        "value": "#644B46",
+        "variable": "--media-time-color"
+      },
+      "mediaIdleColor": {
+        "selector": "color-picker",
+        "value": "#503C38",
+        "variable": "--media-idle-color"
+      }
     }
   },
   "id": "sentinel.default",

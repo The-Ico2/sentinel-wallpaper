@@ -135,6 +135,13 @@ fn main() -> windows::core::Result<()> {
 	info!("[{}] Config loaded from {}", DEBUG_NAME, config_path.display());
 
 	let mut runtime = WallpaperRuntime::new();
+
+	// Refresh Windows' wallpaper cache with the saved snapshot BMP BEFORE
+	// creating WorkerW children.  This ensures that if the process is later
+	// killed (Task Manager, crash) Windows shows a recent frame instead of
+	// whatever was cached from a previous session.
+	runtime.apply_snapshot_as_wallpaper();
+
 	runtime.apply(&config);
 	if runtime.has_registry_snapshot() {
 		let _ = runtime.sync_pause_state_now(false);
@@ -155,11 +162,16 @@ fn main() -> windows::core::Result<()> {
 	let mut pending_asset_reload_since: HashMap<std::path::PathBuf, Instant> = HashMap::new();
 	let watcher_debounce = Duration::from_millis(400);
 
+	let mut last_monitor_check = Instant::now();
+	let monitor_check_interval = Duration::from_secs(2);
+
 	loop {
 		unsafe {
 			let mut msg = MSG::default();
 			while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
 				if msg.message == WM_QUIT {
+					warn!("[{}] WM_QUIT received — applying shutdown snapshot", DEBUG_NAME);
+					runtime.shutdown_snapshot();
 					return Ok(());
 				}
 				let _ = TranslateMessage(&msg);
@@ -175,6 +187,27 @@ fn main() -> windows::core::Result<()> {
 				let _ = runtime.sync_pause_state_now(all_paused_before);
 			}
 			warn!("[{}][PAUSE] Reapplied runtime after unpause transition", DEBUG_NAME);
+		}
+
+		// Detect monitor layout changes (rearranged, added, removed, resolution)
+		// and fully reapply so wallpaper windows land on the correct rects.
+		if last_monitor_check.elapsed() >= monitor_check_interval {
+			last_monitor_check = Instant::now();
+			if runtime.monitors_changed() {
+				let all_paused_before = runtime.hosted_all_paused();
+				runtime.apply(&config);
+				if runtime.has_registry_snapshot() {
+					let _ = runtime.sync_pause_state_now(all_paused_before);
+				}
+				warn!("[{}][MONITORS] Layout change detected — reapplied wallpapers", DEBUG_NAME);
+
+				// Refresh asset watcher baselines after full reapply
+				watched_asset_mtime = runtime
+					.active_asset_dirs()
+					.into_iter()
+					.filter_map(|dir| newest_file_modified_recursive(&dir).map(|mtime| (dir, mtime)))
+					.collect();
+			}
 		}
 
 		if watcher_enabled && last_watch_tick.elapsed() >= watcher_interval {

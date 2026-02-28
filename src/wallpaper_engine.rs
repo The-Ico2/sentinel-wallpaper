@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     ptr,
     sync::{mpsc, OnceLock},
+    thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -91,6 +92,15 @@ impl Drop for HostedWallpaper {
     }
 }
 
+/// Data shipped to the snapshot background thread for stitching + disk save.
+struct SnapshotJob {
+    captures: Vec<(RECT, Vec<u8>)>,
+    virtual_width: i32,
+    virtual_height: i32,
+    min_left: i32,
+    min_top: i32,
+}
+
 pub struct WallpaperRuntime {
     hosted: Vec<HostedWallpaper>,
     last_registry_tick: Instant,
@@ -108,7 +118,12 @@ pub struct WallpaperRuntime {
     /// When false, ALL data delivery to webviews is suppressed.
     registry_connected: bool,
     last_sent_demands: HashSet<String>,
-    monitor_bounds_dirty: bool,
+    /// Snapshot of monitor RECTs from the last apply(), used to detect layout changes.
+    last_monitor_rects: Vec<RECT>,
+    /// Timer for periodic BMP saves (no SPI call — just keeps the file fresh).
+    last_snapshot_tick: Instant,
+    /// Channel to the background stitching/save thread.
+    snapshot_tx: Option<mpsc::SyncSender<SnapshotJob>>,
 }
 
 impl WallpaperRuntime {
@@ -133,7 +148,16 @@ impl WallpaperRuntime {
             editable_cache: HashMap::new(),
             registry_connected: false,
             last_sent_demands: HashSet::new(),
-            monitor_bounds_dirty: true,
+            last_monitor_rects: Vec::new(),
+            last_snapshot_tick: Instant::now(),
+            snapshot_tx: {
+                let (tx, rx) = mpsc::sync_channel::<SnapshotJob>(1);
+                thread::Builder::new()
+                    .name("snapshot-worker".into())
+                    .spawn(move || snapshot_worker(rx))
+                    .ok();
+                Some(tx)
+            },
         }
     }
 
@@ -176,6 +200,8 @@ impl WallpaperRuntime {
             error!("[WALLPAPER] No monitors detected, aborting runtime apply");
             return;
         }
+        // Snapshot current layout so monitors_changed() can detect rearrangements
+        self.last_monitor_rects = monitors.iter().map(|m| m.rect).collect();
         warn!(
             "[WALLPAPER][APPLY] {} asset(s), {} monitor(s), {} enabled profile(s)",
             assets.len(),
@@ -347,7 +373,6 @@ impl WallpaperRuntime {
             paused: false,
             asset_dir: asset_dir.to_path_buf(),
         });
-        self.monitor_bounds_dirty = true;
         warn!("[WALLPAPER][EMBED] host committed into runtime state");
         Ok(())
     }
@@ -390,22 +415,19 @@ impl WallpaperRuntime {
                     if hosted.paused {
                         continue;
                     }
+                    // Send per-monitor bounds BEFORE registry data so cursor
+                    // → local coordinate mapping is already set when the
+                    // wallpaper's mouse subscription fires.
+                    let r = hosted.monitor_rect;
+                    let bounds_payload = serde_json::json!({
+                        "type": "native_monitor_bounds",
+                        "left": r.left,
+                        "top": r.top,
+                        "width": r.right - r.left,
+                        "height": r.bottom - r.top,
+                    }).to_string();
+                    let _ = post_webview_json(&hosted.webview, &bounds_payload);
                     let _ = post_webview_json(&hosted.webview, &payload);
-                }
-                // Send per-monitor bounds so each WebView can map cursor to local coords
-                if self.monitor_bounds_dirty {
-                    self.monitor_bounds_dirty = false;
-                    for hosted in &self.hosted {
-                        let r = hosted.monitor_rect;
-                        let bounds_payload = serde_json::json!({
-                            "type": "native_monitor_bounds",
-                            "left": r.left,
-                            "top": r.top,
-                            "width": r.right - r.left,
-                            "height": r.bottom - r.top,
-                        }).to_string();
-                        let _ = post_webview_json(&hosted.webview, &bounds_payload);
-                    }
                 }
             }
         } else {
@@ -440,11 +462,114 @@ impl WallpaperRuntime {
             unpaused_transition = self.sync_pause_state_now(all_paused);
         }
 
+        // ── Periodic BMP save (no SPI call) ────────────────────────
+        // Keeps the snapshot file on disk fresh so that:
+        //   • The next startup SPI call shows a recent frame
+        //   • A Task-Manager kill leaves a recent fallback file
+        // Uses PrintWindow on wallpaper HWNDs (correct content, no app
+        // windows) and ships pixel buffers to a background thread for
+        // the expensive stitching + disk write.
+        if !all_paused && self.last_snapshot_tick.elapsed() >= Duration::from_secs(5) {
+            self.last_snapshot_tick = Instant::now();
+            self.save_snapshot_to_disk();
+        }
+
         unpaused_transition
     }
 
     pub fn hosted_all_paused(&self) -> bool {
         self.hosted.iter().all(|h| h.paused)
+    }
+
+    /// Capture each hosted wallpaper via `PrintWindow` on the main thread,
+    /// then ship the raw pixel buffers to a background thread for stitching
+    /// + BMP save.  Does NOT call `SPI_SETDESKWALLPAPER`.
+    ///
+    /// The main-thread work is only `PrintWindow` + `GetDIBits` per monitor
+    /// (fast GDI calls).  Skips silently if the worker is still busy.
+    pub fn save_snapshot_to_disk(&mut self) {
+        if self.hosted.is_empty() || self.hosted.iter().all(|h| h.paused) {
+            return;
+        }
+
+        let min_left = self.hosted.iter().map(|h| h.monitor_rect.left).min().unwrap_or(0);
+        let min_top = self.hosted.iter().map(|h| h.monitor_rect.top).min().unwrap_or(0);
+        let max_right = self.hosted.iter().map(|h| h.monitor_rect.right).max().unwrap_or(1);
+        let max_bottom = self.hosted.iter().map(|h| h.monitor_rect.bottom).max().unwrap_or(1);
+
+        let virtual_width = (max_right - min_left).max(1);
+        let virtual_height = (max_bottom - min_top).max(1);
+
+        let mut captures: Vec<(RECT, Vec<u8>)> = Vec::with_capacity(self.hosted.len());
+        for hosted in &self.hosted {
+            let width = (hosted.monitor_rect.right - hosted.monitor_rect.left).max(1);
+            let height = (hosted.monitor_rect.bottom - hosted.monitor_rect.top).max(1);
+            match capture_window_bgra(hosted.hwnd, width, height) {
+                Ok(pixels) => captures.push((hosted.monitor_rect, pixels)),
+                Err(e) => {
+                    warn!("[WALLPAPER][SNAP] PrintWindow capture failed: {}", e);
+                }
+            }
+        }
+        if captures.is_empty() {
+            return;
+        }
+
+        let job = SnapshotJob { captures, virtual_width, virtual_height, min_left, min_top };
+        if let Some(tx) = &self.snapshot_tx {
+            let _ = tx.try_send(job);
+        }
+    }
+
+    /// Capture + save + apply as Windows wallpaper.  For shutdown only.
+    pub fn shutdown_snapshot(&mut self) {
+        match self.capture_paused_wallpaper_snapshot(true) {
+            Ok(()) => {
+                warn!("[WALLPAPER][SHUTDOWN] Captured and applied shutdown snapshot");
+            }
+            Err(e) => {
+                warn!("[WALLPAPER][SHUTDOWN] Live capture failed ({}), falling back to saved BMP", e);
+                self.apply_snapshot_as_wallpaper();
+            }
+        }
+    }
+
+    /// Apply the saved snapshot BMP as the Windows desktop wallpaper via
+    /// `SPI_SETDESKWALLPAPER`.  Safe to call before WorkerW children exist
+    /// (startup) or after they've been destroyed (shutdown).
+    pub fn apply_snapshot_as_wallpaper(&self) {
+        let snapshot_dir = sentinel_assets_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("wallpaper")
+            .join("snapshots");
+        let snapshot_path = snapshot_dir.join("paused_wallpaper_snapshot.bmp");
+        if snapshot_path.exists() {
+            match apply_windows_wallpaper(&snapshot_path) {
+                Ok(()) => {
+                    warn!(
+                        "[WALLPAPER][SHUTDOWN] Applied snapshot wallpaper: {}",
+                        snapshot_path.display()
+                    );
+                }
+                Err(e) => {
+                    warn!("[WALLPAPER][SHUTDOWN] Failed to apply snapshot wallpaper: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Re-enumerate monitors and return `true` if the layout (count or any
+    /// RECT) has changed since the last `apply()`.  This is cheap to call
+    /// periodically (a single Win32 `EnumDisplayMonitors` round-trip).
+    pub fn monitors_changed(&self) -> bool {
+        let current = enumerate_monitors();
+        let current_rects: Vec<RECT> = current.iter().map(|m| m.rect).collect();
+        if current_rects.len() != self.last_monitor_rects.len() {
+            return true;
+        }
+        current_rects.iter().zip(self.last_monitor_rects.iter()).any(|(a, b)| {
+            a.left != b.left || a.top != b.top || a.right != b.right || a.bottom != b.bottom
+        })
     }
 
     pub fn active_asset_dirs(&self) -> Vec<PathBuf> {
@@ -868,6 +993,56 @@ fn capture_window_bgra(hwnd: HWND, width: i32, height: i32) -> std::result::Resu
         }
 
         Ok(pixels)
+    }
+}
+
+/// Background thread that stitches raw pixel captures into an RgbaImage
+/// and saves the BMP to disk.  No SPI call — just keeps the file fresh.
+fn snapshot_worker(rx: mpsc::Receiver<SnapshotJob>) {
+    while let Ok(job) = rx.recv() {
+        let mut stitched = RgbaImage::from_pixel(
+            job.virtual_width as u32,
+            job.virtual_height as u32,
+            Rgba([0, 0, 0, 255]),
+        );
+        let mut has_non_black_pixel = false;
+
+        for (r, pixels) in &job.captures {
+            let width = (r.right - r.left).max(1);
+            let height = (r.bottom - r.top).max(1);
+            let offset_x = (r.left - job.min_left).max(0);
+            let offset_y = (r.top - job.min_top).max(0);
+
+            for y in 0..height {
+                for x in 0..width {
+                    let src = ((y * width + x) * 4) as usize;
+                    if src + 3 >= pixels.len() { continue; }
+                    let b = pixels[src];
+                    let g = pixels[src + 1];
+                    let r = pixels[src + 2];
+                    if r != 0 || g != 0 || b != 0 { has_non_black_pixel = true; }
+                    let dst_x = (offset_x + x) as u32;
+                    let dst_y = (offset_y + y) as u32;
+                    if dst_x < stitched.width() && dst_y < stitched.height() {
+                        stitched.put_pixel(dst_x, dst_y, Rgba([r, g, b, 255]));
+                    }
+                }
+            }
+        }
+
+        if !has_non_black_pixel {
+            continue;
+        }
+
+        let snapshot_dir = sentinel_assets_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("wallpaper")
+            .join("snapshots");
+        let _ = fs::create_dir_all(&snapshot_dir);
+        let snapshot_path = snapshot_dir.join("paused_wallpaper_snapshot.bmp");
+        if let Err(e) = stitched.save(&snapshot_path) {
+            warn!("[WALLPAPER][SNAP] Failed to save snapshot: {}", e);
+        }
     }
 }
 
