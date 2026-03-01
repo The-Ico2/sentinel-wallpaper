@@ -1,6 +1,6 @@
 # Sentinel Wallpaper Addon
 
-A WebView2-based wallpaper engine for Windows that embeds interactive HTML/CSS/JS wallpapers directly into the desktop layer. Part of the [Sentinel](https://github.com/The-Ico2/Sentinel) desktop customization platform.
+A GPU-native wallpaper engine for Windows that renders interactive wallpapers directly into the desktop layer using [CanvasX Runtime](https://github.com/The-Ico2/CanvasX). Part of the [Sentinel](https://github.com/The-Ico2/Sentinel) desktop customization platform.
 
 > **Note:** Installing third-party wallpapers is not currently supported. The addon ships with a bundled default wallpaper (`sentinel.default`), but there is no wallpaper marketplace or install mechanism yet — I'm still figuring out the best approach for this. For now, wallpapers must be manually placed in `~/.Sentinel/Assets/wallpaper/`.
 
@@ -10,11 +10,12 @@ A WebView2-based wallpaper engine for Windows that embeds interactive HTML/CSS/J
 
 The wallpaper addon runs as a background process (`sentinel-wallpaper.exe`) that:
 
-- Embeds WebView2 instances into the Windows desktop host (WorkerW), rendering wallpapers behind desktop icons
-- Supports multiple wallpaper profiles across multiple monitors
-- Streams live system data, audio levels, mouse/keyboard input, and CSS variable updates to wallpapers via `postMessage`
+- Compiles wallpaper HTML/CSS into CanvasX Runtime Documents (CXRD) and renders them on the GPU via wgpu (Vulkan / DX12) — no browser engine, no WebView, no JavaScript runtime
+- Embeds render surfaces into the Windows desktop host (WorkerW), displaying wallpapers behind desktop icons
+- Streams live system data (CPU, GPU, RAM, storage, network, audio, etc.) from the Sentinel backend into data-bound elements via named-pipe IPC
+- Supports multiple wallpaper profiles across multiple monitors with virtual viewport scaling (consistent appearance across all resolutions)
 - Intelligently pauses wallpapers when windows are focused, maximized, or fullscreen — capturing a static snapshot as the Windows wallpaper to save resources
-- Hot-reloads configuration changes without restarting
+- Hot-reloads configuration and editable CSS variable changes without restarting
 - Self-installs on first run, scaffolding config files and the bundled default wallpaper asset
 
 ---
@@ -32,9 +33,30 @@ Subsequent launches from the installed location skip the install step.
 
 ---
 
+## Rendering Pipeline
+
+Each wallpaper goes through the CanvasX pipeline:
+
+```
+index.html + style.css → Compiler → CXRD → Layout → Animate → Paint → GPU
+                                              ↑                          |
+                                     SentinelBridge (IPC)         wgpu (Vulkan/DX12)
+```
+
+1. **Compile** — `compile_html()` parses the wallpaper's HTML/CSS into a CanvasX Runtime Document (binary scene graph with resolved styles, assets, and data bindings)
+2. **GPU context** — A wgpu surface is created on the Win32 HWND embedded in the desktop WorkerW
+3. **Per-frame tick** — `SceneGraph::tick()` runs layout (if dirty) → animate → update data bars → prepare text → paint → return GPU instances
+4. **Render** — Instanced SDF quads are submitted to the GPU in a single draw call, plus a text pass via glyphon
+
+### Virtual Viewport Scaling
+
+Layouts are normalized to a 1080p-equivalent virtual viewport (`scale = physical_height / 1080.0`). A wallpaper designed at 1080p will look identical on 1440p, 4K, or any other resolution — font sizes, padding, column widths all scale proportionally.
+
+---
+
 ## File Layout
 
-```ps1
+```
 ~/.Sentinel/
 ├── Addons/
 │   └── wallpaper/
@@ -50,9 +72,12 @@ Subsequent launches from the installed location skip the install step.
 │           └── library.html
 └── Assets/
     └── wallpaper/
+        ├── sentinel.js         # Shared wallpaper SDK
         └── sentinel.default/
             ├── manifest.json
             ├── index.html
+            ├── style.css
+            ├── editable.yaml
             └── preview/
                 └── 1.png
 ```
@@ -107,23 +132,11 @@ settings:
       focus: "per-monitor"        # off | per-monitor | all-monitors
       maximized: "per-monitor"
       fullscreen: "all-monitors"
-      idle_timeout_ms: 0            # pause all wallpapers after idle timeout (0 disables)
+      idle_timeout_ms: 0          # pause all wallpapers after idle timeout (0 disables)
       check_interval_ms: 500
     watcher:
       enabled: true
       interval_ms: 600
-    interactions:
-      send_move: true
-      send_click: true
-      poll_interval_ms: 8
-      move_threshold_px: 0.5
-    audio:
-      enabled: true
-      sample_interval_ms: 100
-      endpoint_refresh_ms: 1200
-      retry_interval_ms: 2000
-      change_threshold: 0.015
-      quantize_decimals: 2
   runtime:
     tick_sleep_ms: 8
     reapply_on_pause_change: true
@@ -138,39 +151,40 @@ settings:
 
 ---
 
+## Live Data Binding
+
+Wallpapers use CanvasX `<data-bind>` elements to display live system data. Values are streamed from the Sentinel backend via the `SentinelBridge` (named-pipe IPC, 250ms poll interval).
+
+```html
+<data-bind binding="cpu.usage" format="{value}%"></data-bind>
+<data-bar binding="ram.used_bytes" max-binding="ram.total_bytes"></data-bar>
+<data-bar-stack max-binding="storage.total_bytes">
+    <data-bar-segment binding="storage.disks.0.used_bytes" style="background: var(--disk0-color)"></data-bar-segment>
+    <data-bar-segment binding="storage.disks.1.used_bytes" style="background: var(--disk1-color)"></data-bar-segment>
+</data-bar-stack>
+```
+
+The bridge tracks 16 data sections: time, cpu, gpu, ram, storage, displays, network, wifi, bluetooth, audio, keyboard, mouse, power, idle, system, and processes. Data is flattened into dot-notation keys (e.g. `cpu.model`, `ram.used_gb`, `storage.disks.0.name`) and pushed into the scene graph each frame.
+
+---
+
 ## Pause Behavior
 
 When a window is focused, maximized, fullscreen, or the system exceeds `idle_timeout_ms` (depending on config), the addon:
 
-1. Captures the current wallpaper frame from each hosted WebView2 window
-2. Stitches per-monitor captures into a single bitmap
+1. Captures the current wallpaper frame from each hosted window via `PrintWindow`
+2. Stitches per-monitor captures into a single bitmap spanning the virtual desktop
 3. Sets it as the Windows desktop wallpaper via `SystemParametersInfoW`
-4. Hides the WebView2 controllers to save GPU/CPU resources
-5. On unpause, restores the live wallpapers and reapplies the runtime
+4. Hides the render windows and pauses the SentinelBridge to save GPU/CPU resources
+5. On unpause, restores the live wallpapers and resumes data polling
+
+A periodic snapshot thread captures frames every 5 seconds for crash recovery. On startup, the last saved snapshot is applied as the Windows wallpaper before render surfaces are created.
 
 Pause modes can be set per-profile or globally in `settings.performance.pausing`:
 
 - **`off`** — Never pause for this condition
 - **`per-monitor`** — Pause only the wallpaper on the monitor where the condition is true
 - **`all-monitors`** — Pause all wallpapers when the condition is true on any monitor
-
----
-
-## WebView2 Message Protocol
-
-The addon communicates with wallpapers via `window.chrome.webview.addEventListener("message", ...)`. All messages are JSON objects with a `type` field.
-
-### Messages Sent to Wallpapers
-
-| Type | Fields | Description |
-| ------ | -------- | ------------- |
-| `native_move` | `x`, `y`, `nx`, `ny` | Cursor position (local px + normalized 0–1) |
-| `native_click` | `x`, `y`, `nx`, `ny` | Left mouse button press |
-| `native_key` | `key`, `vk`, `state` | Keyboard key down/up (A–Z, 0–9, F1–F12, modifiers, etc.) |
-| `native_audio` | `level` | System audio peak level (0.0–1.0) |
-| `native_registry` | `sysdata`, `appdata` | Full system data + per-monitor app data snapshot |
-| `native_pause` | `paused` | Pause state change notification |
-| `native_css_vars` | `vars` | CSS variable updates from manifest `editable` section |
 
 ---
 
@@ -181,42 +195,31 @@ Wallpaper assets are resolved in this order:
 1. **IPC registry** — Query `registry.list_assets` from the backend, filter by `category == "wallpaper"`
 2. **Local fallback** — Scan `~/.Sentinel/Assets/wallpaper/*/manifest.json` directly
 
-Each asset must provide one of:
-
-- An `index.html` file in the asset directory (loaded as `file:///` URL)
-- A `url` field in `manifest.json` metadata
+Each asset must provide an `index.html` file in the asset directory.
 
 ### Editable Properties
 
-Assets can declare editable CSS variables in `manifest.json`:
+Assets declare editable CSS variables via `manifest.json` schema + `editable.yaml` user overrides:
 
-```json
-{
-  "editable": {
-    "hudOpacity": {
-      "variable": "--hud-opacity",
-      "value": 1,
-      "selector": "slider",
-      "min": 0,
-      "max": 1,
-      "step": 0.05
-    }
-  }
-}
+```yaml
+# editable.yaml
+hudOpacity: 0.85
+accentColor: "#ff6b35"
+fontSize: 13
 ```
 
-Changes to these values are pushed live to the wallpaper as `native_css_vars` messages. The addon polls the manifest file every 250ms for changes.
+The `EditableContext` resolves manifest defaults against YAML overrides, producing a flat CSS variable map injected into the CXRD document. Changes are polled every 250ms and trigger layout invalidation — no restart required.
 
 ---
 
 ## Bundled Asset: sentinel.default
 
-An animated dark theme wallpaper included with the addon. Features:
+A dark-themed HUD wallpaper included with the addon, displaying live system data across organized panels. Features:
 
-- Ember particle canvas with accent-colored glow effects
-- HUD panels displaying live system data (CPU, GPU, RAM, storage, network, audio, time, processes, etc.)
-- Customizable accent/ember colors, background, text color, font, and HUD opacity via manifest editable fields
-- Audio-reactive visual intensity
+- **Left column** — CPU, GPU, Memory, Storage (with stacked disk usage bar), Network, Processes
+- **Right column** — Audio, Bluetooth, Media, Power, Display, System, Input
+- **Top bar** — Date, time, uptime
+- Fully customizable via 50+ editable CSS variables (colors, fonts, layout, panel styles, blur, opacity)
 
 ---
 
@@ -230,12 +233,14 @@ The addon communicates with the Sentinel backend over the named pipe `\\.\pipe\s
 | `registry` | `list_sysdata` | Fetch system data for wallpapers |
 | `registry` | `list_appdata` | Fetch per-monitor app data for pause evaluation |
 
+The `SentinelBridge` (from `canvasx-runtime`) handles connection management, heartbeats, reconnection, and data flattening automatically.
+
 ---
 
 ## Requirements
 
 - Windows 10/11
-- [WebView2 Runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (typically pre-installed)
+- GPU with Vulkan or DirectX 12 support
 - Sentinel Backend (`sentinelc.exe`) — auto-started if not running
 
 ---
@@ -243,14 +248,22 @@ The addon communicates with the Sentinel backend over the named pipe `\\.\pipe\s
 ## Tech Stack
 
 - **Language:** Rust
-- **Rendering:** WebView2 via `webview2-com`
-- **Desktop integration:** Win32 API (`windows` crate) — WorkerW embedding, DPI awareness, window management
-- **Audio:** WASAPI peak metering via `IMMDeviceEnumerator` / `IAudioMeterInformation`
+- **Rendering:** [CanvasX Runtime](https://github.com/The-Ico2/CanvasX) — GPU-native scene graph renderer (wgpu, Vulkan/DX12, instanced SDF quads)
+- **Text:** glyphon (cosmic-text) — GPU text rendering with font shaping
+- **Desktop integration:** Win32 API (`windows` crate) — WorkerW embedding, per-monitor DPI awareness, window management
 - **Image:** `image` crate for pause snapshot capture & stitching
 - **IPC:** Named pipes to Sentinel backend (JSON request/response)
+- **Config:** `serde_yaml` for YAML configuration and editables
 
 ---
 
 ## Project Status
 
-Alpha release (`v0.1.0-alpha`). APIs, config format, and behavior may change. Windows only.
+Active development (`v0.3.0`). APIs, config format, and behavior may change. Windows only.
+
+---
+
+## Contact
+
+- **Discord:** the_ico2
+- **X (Twitter):** The_Ico2
