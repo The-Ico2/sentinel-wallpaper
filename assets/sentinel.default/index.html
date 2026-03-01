@@ -29,7 +29,7 @@
       </span>
     </div>
 
-    <!-- Left: Hardware & System -->
+    <!-- Left: Hardware -->
     <div class="left">
       <!-- CPU -->
       <div class="pnl" id="cpuPanel">
@@ -40,12 +40,8 @@
             <data-bind class="val" binding="cpu.brand" />
           </div>
           <div class="row">
-            <span class="lbl">Cores</span>
-            <data-bind class="val" binding="cpu.physical_cores" />
-          </div>
-          <div class="row">
-            <span class="lbl">Threads</span>
-            <data-bind class="val" binding="cpu.logical_cores" />
+            <span class="lbl">Cores / Threads</span>
+            <span class="val"><data-bind binding="cpu.physical_cores" /> / <data-bind binding="cpu.logical_cores" /></span>
           </div>
           <div class="row">
             <span class="lbl">Usage</span>
@@ -68,22 +64,6 @@
             <span class="lbl">Handles</span>
             <data-bind class="val" binding="cpu.handle_count" />
           </div>
-          <div class="row">
-            <span class="lbl">Virtualization</span>
-            <data-bind class="val" binding="cpu.virtualization" />
-          </div>
-          <div class="row">
-            <span class="lbl">L1 Cache</span>
-            <data-bind class="val" binding="cpu.l1_cache_kb" format="{} KB" />
-          </div>
-          <div class="row">
-            <span class="lbl">L2 Cache</span>
-            <data-bind class="val" binding="cpu.l2_cache_kb" format="{} KB" />
-          </div>
-          <div class="row">
-            <span class="lbl">L3 Cache</span>
-            <data-bind class="val" binding="cpu.l3_cache_kb" format="{} KB" />
-          </div>
         </div>
       </div>
 
@@ -101,26 +81,10 @@
           </div>
           <data-bar class="bar-wrap" binding="gpu.usage_percent" max="100" style="color: var(--gpu-bar-color);" />
           <div class="row">
-            <span class="lbl">VRAM Used</span>
-            <data-bind class="val" binding="gpu.vram_used_mb" format="{} MB" />
-          </div>
-          <div class="row">
-            <span class="lbl">VRAM Total</span>
-            <data-bind class="val" binding="gpu.vram_total_mb" format="{} MB" />
-          </div>
-          <div class="row">
-            <span class="lbl">VRAM Usage</span>
-            <data-bind class="val" binding="gpu.memory_usage_percent" format="{.1}%" />
+            <span class="lbl">VRAM</span>
+            <span class="val"><data-bind binding="gpu.vram_used_mb" format="{} MB" /> / <data-bind binding="gpu.vram_total_mb" format="{} MB" /></span>
           </div>
           <data-bar class="bar-wrap" binding="gpu.memory_usage_percent" max="100" style="color: var(--vram-bar-color);" />
-          <div class="row">
-            <span class="lbl">Driver</span>
-            <data-bind class="val" binding="gpu.driver_version" />
-          </div>
-          <div class="row">
-            <span class="lbl">Driver Date</span>
-            <data-bind class="val" binding="gpu.driver_date" />
-          </div>
           <div class="row">
             <span class="lbl">Temperature</span>
             <data-bind class="val" binding="gpu.temperature_c" format="{.1}°C" />
@@ -130,28 +94,12 @@
             <data-bind class="val" binding="gpu.clock_graphics_mhz" format="{} MHz" />
           </div>
           <div class="row">
-            <span class="lbl">Mem Clock</span>
-            <data-bind class="val" binding="gpu.clock_memory_mhz" format="{} MHz" />
-          </div>
-          <div class="row">
             <span class="lbl">Power</span>
             <data-bind class="val" binding="gpu.power_draw_w" format="{.1} W" />
           </div>
           <div class="row">
-            <span class="lbl">Fan Speed</span>
-            <data-bind class="val" binding="gpu.fan_speed_percent" format="{.0}%" />
-          </div>
-          <div class="row">
-            <span class="lbl">Encoder</span>
-            <data-bind class="val" binding="gpu.encoder_usage_percent" format="{.1}%" />
-          </div>
-          <div class="row">
-            <span class="lbl">Decoder</span>
-            <data-bind class="val" binding="gpu.decoder_usage_percent" format="{.1}%" />
-          </div>
-          <div class="row">
-            <span class="lbl">Manufacturer</span>
-            <data-bind class="val" binding="gpu.manufacturer" />
+            <span class="lbl">Driver</span>
+            <data-bind class="val" binding="gpu.driver_version" />
           </div>
         </div>
       </div>
@@ -161,16 +109,8 @@
         <h2>Memory</h2>
         <div id="ramInfo">
           <div class="row">
-            <span class="lbl">Total</span>
-            <data-bind class="val" binding="ram.total_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">In Use</span>
-            <data-bind class="val" binding="ram.used_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">Available</span>
-            <data-bind class="val" binding="ram.available_bytes" format="{bytes}" />
+            <span class="lbl">Used / Total</span>
+            <span class="val"><data-bind binding="ram.used_bytes" format="{bytes}" /> / <data-bind binding="ram.total_bytes" format="{bytes}" /></span>
           </div>
           <div class="row">
             <span class="lbl">Usage</span>
@@ -186,28 +126,8 @@
             <data-bind class="val" binding="ram.memory_type" />
           </div>
           <div class="row">
-            <span class="lbl">Form Factor</span>
-            <data-bind class="val" binding="ram.form_factor" />
-          </div>
-          <div class="row">
-            <span class="lbl">Slots Used</span>
-            <data-bind class="val" binding="ram.slots_used" />
-          </div>
-          <div class="row">
-            <span class="lbl">Swap Used</span>
-            <data-bind class="val" binding="ram.swap_used_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">Swap Total</span>
-            <data-bind class="val" binding="ram.swap_total_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">Swap Usage</span>
-            <data-bind class="val" binding="ram.swap_usage_percent" format="{.1}%" />
-          </div>
-          <div class="row">
-            <span class="lbl">Cached</span>
-            <data-bind class="val" binding="ram.cached_bytes" format="{bytes}" />
+            <span class="lbl">Swap</span>
+            <span class="val"><data-bind binding="ram.swap_used_bytes" format="{bytes}" /> / <data-bind binding="ram.swap_total_bytes" format="{bytes}" /></span>
           </div>
         </div>
       </div>
@@ -217,57 +137,32 @@
         <h2>Storage</h2>
         <div id="storageInfo">
           <div class="row">
-            <span class="lbl">Total</span>
-            <data-bind class="val" binding="storage.total_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">Used</span>
-            <data-bind class="val" binding="storage.used_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">Available</span>
-            <data-bind class="val" binding="storage.available_bytes" format="{bytes}" />
+            <span class="lbl">Used / Total</span>
+            <span class="val"><data-bind binding="storage.used_bytes" format="{bytes}" /> / <data-bind binding="storage.total_bytes" format="{bytes}" /></span>
           </div>
           <div class="row">
             <span class="lbl">Usage</span>
             <data-bind class="val" binding="storage.usage_percent" format="{.1}%" />
           </div>
-          <data-bar class="bar-wrap" binding="storage.usage_percent" max="100" style="color: var(--storage-bar-color);" />
-          <div class="row">
-            <span class="lbl">Disks</span>
-            <data-bind class="val" binding="storage.disk_count" />
-          </div>
+          <data-bar-stack class="bar-wrap" max-binding="storage.total_bytes">
+            <data-bar-segment binding="storage.disks.0.used_bytes" style="color: var(--storage-bar-color);" />
+            <data-bar-segment binding="storage.disks.1.used_bytes" style="color: var(--storage-pool-bar-color);" />
+          </data-bar-stack>
           <div class="row">
             <span class="lbl">Disk 0</span>
-            <data-bind class="val" binding="storage.disks.0.name" />
+            <span class="val"><data-bind binding="storage.disks.0.name" /> (<data-bind binding="storage.disks.0.kind" />)</span>
           </div>
           <div class="row">
-            <span class="lbl">  Type</span>
-            <data-bind class="val" binding="storage.disks.0.kind" />
-          </div>
-          <div class="row">
-            <span class="lbl">  Used</span>
-            <data-bind class="val" binding="storage.disks.0.used_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">  Total</span>
-            <data-bind class="val" binding="storage.disks.0.total_bytes" format="{bytes}" />
+            <span class="lbl">  Used / Total</span>
+            <span class="val"><data-bind binding="storage.disks.0.used_bytes" format="{bytes}" /> / <data-bind binding="storage.disks.0.total_bytes" format="{bytes}" /></span>
           </div>
           <div class="row">
             <span class="lbl">Disk 1</span>
-            <data-bind class="val" binding="storage.disks.1.name" />
+            <span class="val"><data-bind binding="storage.disks.1.name" /> (<data-bind binding="storage.disks.1.kind" />)</span>
           </div>
           <div class="row">
-            <span class="lbl">  Type</span>
-            <data-bind class="val" binding="storage.disks.1.kind" />
-          </div>
-          <div class="row">
-            <span class="lbl">  Used</span>
-            <data-bind class="val" binding="storage.disks.1.used_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">  Total</span>
-            <data-bind class="val" binding="storage.disks.1.total_bytes" format="{bytes}" />
+            <span class="lbl">  Used / Total</span>
+            <span class="val"><data-bind binding="storage.disks.1.used_bytes" format="{bytes}" /> / <data-bind binding="storage.disks.1.total_bytes" format="{bytes}" /></span>
           </div>
         </div>
       </div>
@@ -293,14 +188,6 @@
             <data-bind class="val" binding="network.total_transmitted_bytes" format="{bytes}" />
           </div>
           <div class="row">
-            <span class="lbl">Packets ↓</span>
-            <data-bind class="val" binding="network.total_packets_received" />
-          </div>
-          <div class="row">
-            <span class="lbl">Packets ↑</span>
-            <data-bind class="val" binding="network.total_packets_transmitted" />
-          </div>
-          <div class="row">
             <span class="lbl">Interfaces</span>
             <data-bind class="val" binding="network.interface_count" />
           </div>
@@ -320,16 +207,8 @@
             <data-bind class="val" binding="processes.total_cpu_usage" format="{.1}%" />
           </div>
           <div class="row">
-            <span class="lbl">Memory Total</span>
+            <span class="lbl">Memory</span>
             <data-bind class="val" binding="processes.total_memory_bytes" format="{bytes}" />
-          </div>
-          <div class="row">
-            <span class="lbl">Running</span>
-            <data-bind class="val" binding="processes.status_counts.running" />
-          </div>
-          <div class="row">
-            <span class="lbl">Sleeping</span>
-            <data-bind class="val" binding="processes.status_counts.sleeping" />
           </div>
           <div class="row">
             <span class="lbl">Top CPU 1</span>
@@ -340,20 +219,12 @@
             <data-bind class="val" binding="processes.top_cpu.1.name" />
           </div>
           <div class="row">
-            <span class="lbl">Top CPU 3</span>
-            <data-bind class="val" binding="processes.top_cpu.2.name" />
-          </div>
-          <div class="row">
             <span class="lbl">Top Mem 1</span>
             <data-bind class="val" binding="processes.top_memory.0.name" />
           </div>
           <div class="row">
             <span class="lbl">Top Mem 2</span>
             <data-bind class="val" binding="processes.top_memory.1.name" />
-          </div>
-          <div class="row">
-            <span class="lbl">Top Mem 3</span>
-            <data-bind class="val" binding="processes.top_memory.2.name" />
           </div>
         </div>
       </div>
@@ -363,7 +234,7 @@
     <div>
     </div>
 
-    <!-- Right: Connectivity, Peripherals, Activity -->
+    <!-- Right: Connectivity & System -->
     <div class="right">
       <!-- Audio -->
       <div class="pnl" id="audioPanel">
@@ -383,68 +254,8 @@
             <data-bind class="val" binding="audio.output_device.muted" />
           </div>
           <div class="row">
-            <span class="lbl">Audio Level</span>
-            <data-bind class="val" binding="audio.output_device.audio_level" format="{.2}" />
-          </div>
-          <div class="row">
-            <span class="lbl">Peak</span>
-            <data-bind class="val" binding="audio.output_device.levels.peak" format="{.3}" />
-          </div>
-          <div class="row">
-            <span class="lbl">RMS</span>
-            <data-bind class="val" binding="audio.output_device.levels.rms" format="{.3}" />
-          </div>
-          <div class="row">
             <span class="lbl">Input</span>
             <data-bind class="val" binding="audio.input_device.name" />
-          </div>
-          <div class="row">
-            <span class="lbl">Input Vol</span>
-            <data-bind class="val" binding="audio.input_device.volume_percent" format="{.0}%" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Wi-Fi -->
-      <div class="pnl" id="wifiPanel">
-        <h2>Wi-Fi</h2>
-        <div id="wifiInfo">
-          <div class="row">
-            <span class="lbl">Connected</span>
-            <data-bind class="val" binding="wifi.connected.is_connected" />
-          </div>
-          <div class="row">
-            <span class="lbl">SSID</span>
-            <data-bind class="val" binding="wifi.connected.ssid" />
-          </div>
-          <div class="row">
-            <span class="lbl">Signal</span>
-            <data-bind class="val" binding="wifi.connected.signal_percent" format="{}%" />
-          </div>
-          <data-bar class="bar-wrap" binding="wifi.connected.signal_percent" max="100" style="color: var(--wifi-bar-color);" />
-          <div class="row">
-            <span class="lbl">Band</span>
-            <data-bind class="val" binding="wifi.connected.band" />
-          </div>
-          <div class="row">
-            <span class="lbl">Radio</span>
-            <data-bind class="val" binding="wifi.connected.radio_type" />
-          </div>
-          <div class="row">
-            <span class="lbl">Channel</span>
-            <data-bind class="val" binding="wifi.connected.channel" />
-          </div>
-          <div class="row">
-            <span class="lbl">Auth</span>
-            <data-bind class="val" binding="wifi.connected.authentication" />
-          </div>
-          <div class="row">
-            <span class="lbl">RX Rate</span>
-            <data-bind class="val" binding="wifi.connected.receive_rate_mbps" format="{.1} Mbps" />
-          </div>
-          <div class="row">
-            <span class="lbl">TX Rate</span>
-            <data-bind class="val" binding="wifi.connected.transmit_rate_mbps" format="{.1} Mbps" />
           </div>
         </div>
       </div>
@@ -460,10 +271,6 @@
           <div class="row">
             <span class="lbl">Status</span>
             <data-bind class="val" binding="bluetooth.adapter.status" />
-          </div>
-          <div class="row">
-            <span class="lbl">Present</span>
-            <data-bind class="val" binding="bluetooth.adapter.present" />
           </div>
           <div class="row">
             <span class="lbl">Device 1</span>
@@ -493,24 +300,8 @@
             <data-bind class="val" binding="media.artist" />
           </div>
           <div class="row">
-            <span class="lbl">Album</span>
-            <data-bind class="val" binding="media.album" />
-          </div>
-          <div class="row">
             <span class="lbl">Status</span>
             <data-bind class="val" binding="media.playback_status" />
-          </div>
-          <div class="row">
-            <span class="lbl">Playing</span>
-            <data-bind class="val" binding="media.playing" />
-          </div>
-          <div class="row">
-            <span class="lbl">Shuffle</span>
-            <data-bind class="val" binding="media.shuffle" />
-          </div>
-          <div class="row">
-            <span class="lbl">Repeat</span>
-            <data-bind class="val" binding="media.repeat_mode" />
           </div>
           <div class="row">
             <span class="lbl">Source</span>
@@ -533,35 +324,19 @@
           </div>
           <data-bar class="bar-wrap" binding="power.battery.percent" max="100" style="color: var(--battery-bar-color);" />
           <div class="row">
-            <span class="lbl">Present</span>
-            <data-bind class="val" binding="power.battery.present" />
-          </div>
-          <div class="row">
             <span class="lbl">Charging</span>
             <data-bind class="val" binding="power.battery.charging" />
           </div>
           <div class="row">
-            <span class="lbl">Saver</span>
-            <data-bind class="val" binding="power.battery.saver_active" />
-          </div>
-          <div class="row">
             <span class="lbl">Power Plan</span>
             <data-bind class="val" binding="power.power_plan" />
-          </div>
-          <div class="row">
-            <span class="lbl">Chemistry</span>
-            <data-bind class="val" binding="power.battery.details.chemistry" />
-          </div>
-          <div class="row">
-            <span class="lbl">Health</span>
-            <data-bind class="val" binding="power.battery.details.health_percent" format="{.1}%" />
           </div>
         </div>
       </div>
 
       <!-- Displays -->
       <div class="pnl" id="displayPanel">
-        <h2>Displays</h2>
+        <h2>Display</h2>
         <div id="displayInfo">
           <div class="row">
             <span class="lbl">Monitor</span>
@@ -580,28 +355,8 @@
             <data-bind class="val" binding="displays.0.metadata.dpi" />
           </div>
           <div class="row">
-            <span class="lbl">Scale</span>
-            <data-bind class="val" binding="displays.0.metadata.scale" format="{.0}%" />
-          </div>
-          <div class="row">
-            <span class="lbl">Color Depth</span>
-            <data-bind class="val" binding="displays.0.metadata.color_depth_bits" format="{}-bit" />
-          </div>
-          <div class="row">
             <span class="lbl">Connection</span>
             <data-bind class="val" binding="displays.0.metadata.connection_type" />
-          </div>
-          <div class="row">
-            <span class="lbl">HDR</span>
-            <data-bind class="val" binding="displays.0.metadata.hdr_supported" />
-          </div>
-          <div class="row">
-            <span class="lbl">Manufacturer</span>
-            <data-bind class="val" binding="displays.0.metadata.manufacturer" />
-          </div>
-          <div class="row">
-            <span class="lbl">Year</span>
-            <data-bind class="val" binding="displays.0.metadata.year_of_manufacture" />
           </div>
         </div>
       </div>
@@ -610,10 +365,6 @@
       <div class="pnl" id="systemPanel">
         <h2>System</h2>
         <div id="systemInfo">
-          <div class="row">
-            <span class="lbl">Hostname</span>
-            <data-bind class="val" binding="system.hostname" />
-          </div>
           <div class="row">
             <span class="lbl">OS</span>
             <data-bind class="val" binding="system.os.long_name" />
@@ -650,29 +401,13 @@
             <span class="lbl">Timezone</span>
             <data-bind class="val" binding="system.locale.timezone.display_name" />
           </div>
-          <div class="row">
-            <span class="lbl">Theme</span>
-            <data-bind class="val" binding="system.theme.system_theme" />
-          </div>
-          <div class="row">
-            <span class="lbl">Board</span>
-            <data-bind class="val" binding="system.motherboard.product" />
-          </div>
-          <div class="row">
-            <span class="lbl">BIOS</span>
-            <data-bind class="val" binding="system.bios.name" />
-          </div>
         </div>
       </div>
 
-      <!-- Keyboard -->
-      <div class="pnl" id="kbPanel">
-        <h2>Keyboard</h2>
-        <div id="kbInfo">
-          <div class="row">
-            <span class="lbl">Layout</span>
-            <data-bind class="val" binding="keyboard.layout_id" />
-          </div>
+      <!-- Input -->
+      <div class="pnl" id="inputPanel">
+        <h2>Input</h2>
+        <div id="inputInfo">
           <div class="row">
             <span class="lbl">Caps Lock</span>
             <data-bind class="val" binding="keyboard.toggle_states.caps_lock" />
@@ -682,41 +417,11 @@
             <data-bind class="val" binding="keyboard.toggle_states.num_lock" />
           </div>
           <div class="row">
-            <span class="lbl">Scroll Lock</span>
-            <data-bind class="val" binding="keyboard.toggle_states.scroll_lock" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Mouse -->
-      <div class="pnl" id="mousePanel">
-        <h2>Mouse</h2>
-        <div id="mouseInfo">
-          <div class="row">
-            <span class="lbl">Position</span>
+            <span class="lbl">Mouse Pos</span>
             <data-bind class="val" binding="mouse.cursor.x" />
           </div>
           <div class="row">
-            <span class="lbl">Left Clicks</span>
-            <data-bind class="val" binding="mouse.buttons.left_clicks" />
-          </div>
-          <div class="row">
-            <span class="lbl">Right Clicks</span>
-            <data-bind class="val" binding="mouse.buttons.right_clicks" />
-          </div>
-          <div class="row">
-            <span class="lbl">Speed</span>
-            <data-bind class="val" binding="mouse.speed" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Idle -->
-      <div class="pnl" id="idlePanel">
-        <h2>Idle</h2>
-        <div id="idleInfo">
-          <div class="row">
-            <span class="lbl">State</span>
+            <span class="lbl">Idle</span>
             <data-bind class="val" binding="idle.idle_state" />
           </div>
           <div class="row">
@@ -726,10 +431,6 @@
           <div class="row">
             <span class="lbl">Locked</span>
             <data-bind class="val" binding="idle.screen_locked" />
-          </div>
-          <div class="row">
-            <span class="lbl">Screensaver</span>
-            <data-bind class="val" binding="idle.screensaver_active" />
           </div>
         </div>
       </div>
@@ -750,5 +451,3 @@
   <script src="script.js" defer>
   </script>
 </body>
-
-</html>

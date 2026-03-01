@@ -114,7 +114,11 @@ impl HostedWallpaper {
         let dt = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
 
-        let (vw, vh) = (self.gpu_ctx.size.0 as f32, self.gpu_ctx.size.1 as f32);
+        // Virtual viewport: scale layout to a 1080p-equivalent so the
+        // wallpaper looks identical on screens of any resolution.
+        let (pw, ph) = (self.gpu_ctx.size.0 as f32, self.gpu_ctx.size.1 as f32);
+        let scale = (ph / 1080.0).max(1.0);
+        let (vw, vh) = (pw / scale, ph / scale);
 
         // Tick: layout → animate → paint.
         let (instances, clear_color) =
@@ -158,7 +162,7 @@ impl HostedWallpaper {
         }
 
         // Submit to GPU.
-        self.renderer.begin_frame(&self.gpu_ctx, dt, 1.0);
+        self.renderer.begin_frame(&self.gpu_ctx, dt, scale);
         match self.renderer.render(&self.gpu_ctx, &instances, text_areas, clear_color) {
             Ok(()) => {}
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
