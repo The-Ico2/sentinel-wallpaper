@@ -2,7 +2,6 @@
 
 mod bootstrap;
 mod data_loaders;
-mod ipc_connector;
 mod logging;
 mod utility;
 mod wallpaper_engine;

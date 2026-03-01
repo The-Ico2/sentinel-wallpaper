@@ -1,54 +1,75 @@
+// sentinel-wallpaper/src/wallpaper_engine.rs
+//
+// CanvasX GPU-rendered wallpaper engine.
+//
+// Renders live wallpapers via wgpu (Vulkan/DX12) using CanvasX's HTML/CSS→CXRD
+// compiler and GPU scene renderer. Each monitor gets its own GPU context,
+// renderer, and scene graph. System data flows from sentinel-core through the
+// SentinelBridge IPC client and is bound into the scene automatically.
+//
+// Replaces the previous WebView2-based renderer with a fully native GPU
+// pipeline: no browser engine, no JavaScript runtime, just direct GPU draws.
+
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    mem,
+    fs, mem,
     path::{Path, PathBuf},
     ptr,
     sync::{mpsc, OnceLock},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use serde::Deserialize;
 use serde_json::Value;
-use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use image::{Rgba, RgbaImage};
+
+// CanvasX Runtime
+use canvasx_runtime::gpu::context::GpuContext;
+use canvasx_runtime::gpu::renderer::Renderer;
+use canvasx_runtime::scene::graph::SceneGraph;
+use canvasx_runtime::compiler::html::compile_html;
+use canvasx_runtime::compiler::editable::EditableContext;
+use canvasx_runtime::ipc::sentinel::{SentinelBridge, SentinelBridgeConfig};
+use canvasx_runtime::cxrd::document::SceneType;
+
+// Windows APIs
 use windows::{
     core::{w, BOOL, PCWSTR},
     Win32::{
-        Foundation::{E_POINTER, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::Gdi::{
             BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-            EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, HDC, HGDIOBJ, HMONITOR, MonitorFromWindow,
-            MONITORINFOEXW, MONITOR_DEFAULTTONEAREST, ReleaseDC, SelectObject, BI_RGB, BITMAPINFO, BITMAPINFOHEADER,
-            DIB_RGB_COLORS, SRCCOPY,
+            EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, HDC, HGDIOBJ, HMONITOR,
+            MonitorFromWindow, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST, ReleaseDC, SelectObject,
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, SRCCOPY,
         },
         Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
-        System::{Com::*, LibraryLoader::GetModuleHandleW},
+        System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
-            CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, FindWindowExW, FindWindowW,
-            GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect, IsZoomed, RegisterClassW, SendMessageTimeoutW,
-            SetWindowLongW,
-            SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST,
-            SMTO_NORMAL, SWP_FRAMECHANGED,
-            SWP_NOACTIVATE, SWP_SHOWWINDOW, WINDOW_EX_STYLE,
-            WINDOW_STYLE, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-            WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-            WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
-            SystemParametersInfoW, SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
+            CreateWindowExW, DefWindowProcW, DestroyWindow, EnumWindows, FindWindowExW,
+            FindWindowW, GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect,
+            IsZoomed, RegisterClassW, SendMessageTimeoutW, SetWindowLongW, SetWindowPos,
+            ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOP,
+            HWND_TOPMOST, SMTO_NORMAL, SW_HIDE, SW_SHOW, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+            SWP_SHOWWINDOW, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSW, WS_CAPTION, WS_CHILD,
+            WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_DLGMODALFRAME,
+            WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE, WS_MAXIMIZEBOX,
+            WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE, SystemParametersInfoW,
+            SPI_SETDESKWALLPAPER, SPIF_SENDCHANGE, SPIF_UPDATEINIFILE,
         },
     },
 };
 
 use crate::{
     data_loaders::config::{AddonConfig, PauseMode, WallpaperConfig},
-    error,
-    ipc_connector::{request, request_quick},
+    error, warn,
     utility::{sentinel_assets_dir, to_wstring},
-    warn,
 };
 
 const HOST_CLASS_NAME: PCWSTR = w!("SentinelWallpaperHostWindow");
+
+// ── Data types ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Clone)]
 struct RegistryAsset {
@@ -68,11 +89,13 @@ struct MonitorArea {
     rect: RECT,
 }
 
+/// A GPU-rendered wallpaper instance hosted on a single monitor.
 struct HostedWallpaper {
     hwnd: HWND,
-    controller: ICoreWebView2Controller,
-    webview: ICoreWebView2,
-    source_url: String,
+    gpu_ctx: GpuContext,
+    renderer: Renderer,
+    scene: SceneGraph,
+    source_path: PathBuf,
     monitor_rect: RECT,
     monitor_id: Option<String>,
     pause_focus_mode: PauseMode,
@@ -81,12 +104,82 @@ struct HostedWallpaper {
     pause_battery_mode: PauseMode,
     paused: bool,
     asset_dir: PathBuf,
+    last_frame: Instant,
+}
+
+impl HostedWallpaper {
+    /// Render a single frame.
+    fn render_frame(&mut self) {
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+
+        let (vw, vh) = (self.gpu_ctx.size.0 as f32, self.gpu_ctx.size.1 as f32);
+
+        // Tick: layout → animate → paint.
+        let (instances, clear_color) =
+            self.scene.tick(vw, vh, dt, &mut self.renderer.font_system);
+        let instances = instances.to_vec();
+        let text_areas = self.scene.text_areas();
+
+        // Diagnostic: log render stats once (first frame only).
+        static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            warn!("[WALLPAPER][DIAG] first frame: {} paint instances, {} text areas, clear={:?}, vp={}x{}",
+                instances.len(), text_areas.len(), clear_color, vw, vh);
+            // Dump ALL instances for debugging layout rects
+            for (i, inst) in instances.iter().enumerate() {
+                warn!("[WALLPAPER][DIAG] inst[{}]: rect=[{:.0},{:.0},{:.0},{:.0}] bg=[{:.2},{:.2},{:.2},{:.2}] flags=0x{:x}",
+                    i, inst.rect[0], inst.rect[1], inst.rect[2], inst.rect[3],
+                    inst.bg_color[0], inst.bg_color[1], inst.bg_color[2], inst.bg_color[3],
+                    inst.flags);
+            }
+            // Dump ALL text areas
+            for (i, ta) in text_areas.iter().enumerate() {
+                warn!("[WALLPAPER][DIAG] text[{}]: pos=[{:.0},{:.0}] bounds=[{},{},{},{}]",
+                    i,
+                    ta.left, ta.top,
+                    ta.bounds.left, ta.bounds.top, ta.bounds.right, ta.bounds.bottom);
+            }
+            // Dump node tree layout info for debugging
+            let doc = &self.scene.document;
+            for (i, node) in doc.nodes.iter().enumerate() {
+                let rect = &node.layout.rect;
+                let cr = &node.layout.content_rect;
+                if !node.classes.is_empty() || i < 10 || (rect.width > 0.0 && rect.height > 0.0 && i < 102) {
+                    warn!("[WALLPAPER][DIAG] node[{}] tag={:?} cls={:?} disp={:?} rect=[{:.0},{:.0},{:.0},{:.0}] cr=[{:.0},{:.0},{:.0},{:.0}] grid_col=({},{}) grid_row=({},{})",
+                        i, node.tag, node.classes, node.style.display,
+                        rect.x, rect.y, rect.width, rect.height,
+                        cr.x, cr.y, cr.width, cr.height,
+                        node.style.grid_column_start, node.style.grid_column_end,
+                        node.style.grid_row_start, node.style.grid_row_end);
+                }
+            }
+        }
+
+        // Submit to GPU.
+        self.renderer.begin_frame(&self.gpu_ctx, dt, 1.0);
+        match self.renderer.render(&self.gpu_ctx, &instances, text_areas, clear_color) {
+            Ok(()) => {}
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                let (w, h) = self.gpu_ctx.size;
+                self.gpu_ctx.resize(w, h);
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => {
+                error!("[WALLPAPER] GPU out of memory");
+            }
+            Err(e) => {
+                warn!("[WALLPAPER] Surface error: {:?}", e);
+            }
+        }
+    }
 }
 
 impl Drop for HostedWallpaper {
     fn drop(&mut self) {
+        // GPU resources (gpu_ctx, renderer, scene) are dropped automatically
+        // before we destroy the window handle.
         unsafe {
-            let _ = self.controller.Close();
             let _ = DestroyWindow(self.hwnd);
         }
     }
@@ -101,53 +194,58 @@ struct SnapshotJob {
     min_top: i32,
 }
 
+// ── WallpaperRuntime ───────────────────────────────────────────────────────
+
 pub struct WallpaperRuntime {
     hosted: Vec<HostedWallpaper>,
-    last_registry_tick: Instant,
-    last_registry_payload: Option<String>,
+    /// Sentinel IPC bridge — polls sysdata/appdata in the background.
+    bridge: SentinelBridge,
+    /// Whether the bridge has connected at least once.
+    registry_connected: bool,
+    // Pause state
     last_pause_tick: Instant,
     pause_check_interval: Duration,
     idle_pause_after: Option<Duration>,
     log_pause_state_changes: bool,
-    last_pause_snapshot_path: Option<PathBuf>,
-    cached_sysdata: Value,
-    cached_appdata: Value,
+    // Editable CSS var tracking
     last_editable_tick: Instant,
     editable_cache: HashMap<PathBuf, String>,
-    /// Whether the last registry IPC call succeeded.
-    /// When false, ALL data delivery to webviews is suppressed.
-    registry_connected: bool,
-    last_sent_demands: HashSet<String>,
-    /// Snapshot of monitor RECTs from the last apply(), used to detect layout changes.
+    // Monitor change detection
     last_monitor_rects: Vec<RECT>,
-    /// Timer for periodic BMP saves (no SPI call — just keeps the file fresh).
+    // Snapshot
     last_snapshot_tick: Instant,
-    /// Channel to the background stitching/save thread.
     snapshot_tx: Option<mpsc::SyncSender<SnapshotJob>>,
 }
 
 impl WallpaperRuntime {
     pub fn new() -> Self {
         let _ = ensure_host_class();
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        }
+
+        // Start the Sentinel IPC bridge with wallpaper tracking demands.
+        let bridge = SentinelBridge::with_config(SentinelBridgeConfig {
+            tracking_demands: vec![
+                "time", "cpu", "gpu", "ram", "storage", "displays", "network",
+                "wifi", "bluetooth", "audio", "keyboard", "mouse", "power",
+                "idle", "system", "processes",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+            poll_interval_ms: 50,
+            send_heartbeats: true,
+            ..Default::default()
+        });
 
         Self {
             hosted: Vec::new(),
-            last_registry_tick: Instant::now(),
-            last_registry_payload: None,
+            bridge,
+            registry_connected: false,
             last_pause_tick: Instant::now(),
             pause_check_interval: Duration::from_millis(500),
             idle_pause_after: None,
             log_pause_state_changes: true,
-            last_pause_snapshot_path: None,
-            cached_sysdata: Value::Null,
-            cached_appdata: Value::Null,
             last_editable_tick: Instant::now(),
             editable_cache: HashMap::new(),
-            registry_connected: false,
-            last_sent_demands: HashSet::new(),
             last_monitor_rects: Vec::new(),
             last_snapshot_tick: Instant::now(),
             snapshot_tx: {
@@ -162,9 +260,8 @@ impl WallpaperRuntime {
     }
 
     pub fn apply(&mut self, config: &AddonConfig) {
+        // Drop existing hosted wallpapers (drops GPU resources + destroys HWNDs).
         self.hosted.clear();
-        self.last_registry_tick = Instant::now();
-        self.last_registry_payload = None;
         self.last_pause_tick = Instant::now();
         self.pause_check_interval =
             Duration::from_millis(config.settings.performance.pausing.check_interval_ms.max(100));
@@ -176,13 +273,8 @@ impl WallpaperRuntime {
             ))
         };
         self.log_pause_state_changes = config.settings.diagnostics.log_pause_state_changes;
-        self.last_pause_snapshot_path = None;
-        self.cached_sysdata = Value::Null;
-        self.cached_appdata = Value::Null;
         self.last_editable_tick = Instant::now();
         self.editable_cache.clear();
-        self.registry_connected = false;
-        self.last_sent_demands.clear();
         warn!("[WALLPAPER][APPLY] Cleared previous hosted wallpapers");
 
         if config.wallpapers.is_empty() {
@@ -190,7 +282,7 @@ impl WallpaperRuntime {
             return;
         }
 
-        let assets = fetch_wallpaper_assets();
+        let assets = fetch_wallpaper_assets(&self.bridge);
         if assets.is_empty() {
             warn!("[WALLPAPER] No wallpaper assets found from IPC or local Assets/wallpaper");
         }
@@ -200,7 +292,6 @@ impl WallpaperRuntime {
             error!("[WALLPAPER] No monitors detected, aborting runtime apply");
             return;
         }
-        // Snapshot current layout so monitors_changed() can detect rearrangements
         self.last_monitor_rects = monitors.iter().map(|m| m.rect).collect();
         warn!(
             "[WALLPAPER][APPLY] {} asset(s), {} monitor(s), {} enabled profile(s)",
@@ -241,27 +332,30 @@ impl WallpaperRuntime {
         let Some(asset) = resolve_asset(assets, &profile.wallpaper_id) else {
             warn!(
                 "[WALLPAPER] Section '{}' references missing wallpaper_id '{}'",
-                profile.section,
-                profile.wallpaper_id
+                profile.section, profile.wallpaper_id
             );
             return;
         };
 
-        let Some(url) = resolve_asset_url(asset) else {
+        // Find the HTML source file.
+        let source_html = asset.path.join("index.html");
+        if !source_html.exists() {
             warn!(
-                "[WALLPAPER] Asset '{}' has no 'url' and no local index.html",
-                asset.id
+                "[WALLPAPER] Asset '{}' has no index.html at {}",
+                asset.id,
+                source_html.display()
             );
             return;
-        };
+        }
 
         warn!(
-            "[WALLPAPER][PROFILE] asset='{}' resolved url='{}'",
+            "[WALLPAPER][PROFILE] asset='{}' source='{}'",
             asset.id,
-            url
+            source_html.display()
         );
 
-        let targets = resolve_target_monitors(monitors, &profile.monitor_index, assigned_monitors);
+        let targets =
+            resolve_target_monitors(monitors, &profile.monitor_index, assigned_monitors);
         if targets.is_empty() {
             warn!(
                 "[WALLPAPER] Section '{}' has no resolved monitor targets",
@@ -276,26 +370,24 @@ impl WallpaperRuntime {
 
         if profile.mode.eq_ignore_ascii_case("span") && targets.len() > 1 {
             let span_target = make_span_monitor_area(&targets);
-            match self.launch_into_monitor(profile, &span_target, &url, &asset.path) {
+            match self.launch_into_monitor(profile, &span_target, &source_html, &asset.path) {
                 Ok(()) => warn!(
                     "[WALLPAPER] Embedded '{}' as span across {} monitor(s)",
                     profile.wallpaper_id,
                     targets.len(),
                 ),
                 Err(e) => warn!(
-                    "[WALLPAPER] Failed to embed span '{}' ({} monitor(s)): {}",
-                    profile.wallpaper_id,
-                    targets.len(),
-                    e
+                    "[WALLPAPER] Failed to embed span '{}': {}",
+                    profile.wallpaper_id, e
                 ),
             }
             return;
         }
 
         for monitor in targets {
-            match self.launch_into_monitor(profile, monitor, &url, &asset.path) {
+            match self.launch_into_monitor(profile, monitor, &source_html, &asset.path) {
                 Ok(()) => warn!(
-                    "[WALLPAPER] Embedded '{}' into desktop host on monitor {}",
+                    "[WALLPAPER] Embedded '{}' on monitor {}",
                     profile.wallpaper_id,
                     monitor.index + 1,
                 ),
@@ -313,9 +405,9 @@ impl WallpaperRuntime {
         &mut self,
         profile: &WallpaperConfig,
         monitor: &MonitorArea,
-        url: &str,
+        source_html: &Path,
         asset_dir: &Path,
-    ) -> std::result::Result<(), String> {
+    ) -> Result<(), String> {
         warn!(
             "[WALLPAPER][EMBED] monitor={} primary={} rect=[l={},t={},r={},b={}]",
             monitor.index + 1,
@@ -326,44 +418,80 @@ impl WallpaperRuntime {
             monitor.rect.bottom
         );
 
+        // ── Create Win32 host window in WorkerW ────────────────────────
         let desktop = ensure_desktop_host()
             .ok_or_else(|| "Failed to locate WorkerW desktop host window".to_string())?;
-        warn!("[WALLPAPER][EMBED] parent desktop host resolved: {:?}", desktop);
 
         let parent_rect = window_rect(desktop)
             .ok_or_else(|| "Failed to read desktop host window rect".to_string())?;
-        warn!(
-            "[WALLPAPER][EMBED] parent rect=[l={},t={},r={},b={}]",
-            parent_rect.left,
-            parent_rect.top,
-            parent_rect.right,
-            parent_rect.bottom
-        );
 
         let hwnd = create_desktop_child_window(desktop, parent_rect, monitor.rect)?;
+        apply_host_style(hwnd, &profile.z_index)?;
         warn!("[WALLPAPER][EMBED] desktop child created: {:?}", hwnd);
 
-        apply_host_style(hwnd, &profile.z_index)?;
+        // ── Create GPU context from the raw HWND ───────────────────────
+        let width = (monitor.rect.right - monitor.rect.left).max(1) as u32;
+        let height = (monitor.rect.bottom - monitor.rect.top).max(1) as u32;
+
+        let gpu_ctx = pollster::block_on(GpuContext::from_raw_hwnd(hwnd.0 as isize, width, height))
+            .map_err(|e| format!("GPU init failed: {e}"))?;
         warn!(
-            "[WALLPAPER][EMBED] host style applied: hwnd={:?} z_index='{}'",
-            hwnd,
-            profile.z_index
+            "[WALLPAPER][EMBED] GPU context ready: {:?} ({}x{})",
+            gpu_ctx.backend, width, height
         );
 
-        let controller = create_webview_controller(hwnd, monitor.rect, url)?;
-        warn!("[WALLPAPER][EMBED] WebView2 controller attached to hwnd={:?}", hwnd);
+        let renderer = Renderer::new(&gpu_ctx)
+            .map_err(|e| format!("Renderer init failed: {e}"))?;
 
-        let webview = unsafe {
-            controller
-                .CoreWebView2()
-                .map_err(|e| format!("WebView2 CoreWebView2 unavailable: {e:?}"))?
+        // ── Compile HTML/CSS → CXRD scene ──────────────────────────────
+        let html = fs::read_to_string(source_html)
+            .map_err(|e| format!("Failed to read {}: {e}", source_html.display()))?;
+
+        let css_path = asset_dir.join("style.css");
+        let css = if css_path.exists() {
+            fs::read_to_string(&css_path).unwrap_or_default()
+        } else {
+            let alt_css = source_html.with_extension("css");
+            if alt_css.exists() {
+                fs::read_to_string(&alt_css).unwrap_or_default()
+            } else {
+                String::new()
+            }
         };
+
+        let name = asset_dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("wallpaper");
+
+        let doc = compile_html(&html, &css, name, SceneType::Wallpaper, Some(asset_dir))
+            .map_err(|e| format!("HTML compile failed: {e}"))?;
+
+        // Diagnostic logging: show what the compiled scene contains.
+        {
+            let total_nodes = doc.nodes.len();
+            let bg_nodes = doc.nodes.iter().filter(|n| {
+                !matches!(n.style.background, canvasx_runtime::cxrd::style::Background::None)
+            }).count();
+            let text_nodes = doc.nodes.iter().filter(|n| {
+                matches!(n.kind, canvasx_runtime::cxrd::node::NodeKind::Text { .. })
+            }).count();
+            let data_nodes = doc.nodes.iter().filter(|n| {
+                matches!(n.kind, canvasx_runtime::cxrd::node::NodeKind::DataBound { .. })
+            }).count();
+            warn!("[WALLPAPER][DIAG] doc: {} nodes, {} with bg, {} text, {} data-bound, bg={:?}",
+                total_nodes, bg_nodes, text_nodes, data_nodes, doc.background);
+        }
+
+        let scene = SceneGraph::new(doc);
+        warn!("[WALLPAPER][EMBED] scene compiled from {}", source_html.display());
 
         self.hosted.push(HostedWallpaper {
             hwnd,
-            controller,
-            webview,
-            source_url: url.to_string(),
+            gpu_ctx,
+            renderer,
+            scene,
+            source_path: source_html.to_path_buf(),
             monitor_rect: monitor.rect,
             monitor_id: None,
             pause_focus_mode: profile.pause_focus_mode,
@@ -372,10 +500,13 @@ impl WallpaperRuntime {
             pause_battery_mode: profile.pause_battery_mode,
             paused: false,
             asset_dir: asset_dir.to_path_buf(),
+            last_frame: Instant::now(),
         });
-        warn!("[WALLPAPER][EMBED] host committed into runtime state");
+
         Ok(())
     }
+
+    // ── Tick loop ──────────────────────────────────────────────────────
 
     pub fn tick_interactions(&mut self) -> bool {
         if self.hosted.is_empty() {
@@ -383,92 +514,53 @@ impl WallpaperRuntime {
         }
 
         let mut unpaused_transition = false;
-
         let all_paused = self.hosted.iter().all(|h| h.paused);
 
-        let demanded_sections = self.current_demanded_sections();
-        if demanded_sections != self.last_sent_demands {
-            self.send_tracking_demands(&demanded_sections);
-            self.last_sent_demands = demanded_sections.clone();
-        }
-
-        // ── Registry snapshot (determines connectivity) ─────────────
-        self.last_registry_tick = Instant::now();
-
-        if let Some((sysdata, appdata, payload)) = build_registry_snapshot_and_payload(&demanded_sections) {
-            if !self.registry_connected {
+        // Track bridge connectivity.
+        let connected = self.bridge.is_connected();
+        if connected != self.registry_connected {
+            if connected {
                 warn!("[WALLPAPER][REGISTRY] Connection established");
+            } else {
+                warn!("[WALLPAPER][REGISTRY] Connection lost — suppressing data delivery");
             }
-            self.registry_connected = true;
-            self.cached_sysdata = sysdata;
-            self.cached_appdata = appdata;
-            let has_active_hosts = self.hosted.iter().any(|h| !h.paused);
-            let should_send = self
-                .last_registry_payload
-                .as_ref()
-                .map(|prev| prev != &payload)
-                .unwrap_or(true);
+            self.registry_connected = connected;
+        }
 
-            if has_active_hosts && should_send {
-                self.last_registry_payload = Some(payload.clone());
-                for hosted in &self.hosted {
-                    if hosted.paused {
-                        continue;
-                    }
-                    // Send per-monitor bounds BEFORE registry data so cursor
-                    // → local coordinate mapping is already set when the
-                    // wallpaper's mouse subscription fires.
-                    let r = hosted.monitor_rect;
-                    let bounds_payload = serde_json::json!({
-                        "type": "native_monitor_bounds",
-                        "left": r.left,
-                        "top": r.top,
-                        "width": r.right - r.left,
-                        "height": r.bottom - r.top,
-                    }).to_string();
-                    let _ = post_webview_json(&hosted.webview, &bounds_payload);
-                    let _ = post_webview_json(&hosted.webview, &payload);
+        // Feed system data from bridge → scene graphs.
+        if connected && !all_paused {
+            let flat_data = self.bridge.get_data();
+            for hosted in &mut self.hosted {
+                if hosted.paused {
+                    continue;
                 }
+                hosted.scene.update_data_batch(flat_data.clone());
             }
-        } else {
-            if self.registry_connected {
-                warn!("[WALLPAPER][REGISTRY] Connection lost — suppressing all data delivery");
-            }
-            self.registry_connected = false;
         }
 
-        // ── All interaction data gated behind registry connection ───
-        if !self.registry_connected {
-            // Still evaluate pausing even without registry,
-            // but skip mouse/keyboard/audio delivery.
-            if self.last_pause_tick.elapsed() >= self.pause_check_interval {
-                self.last_pause_tick = Instant::now();
-            }
-            return false;
-        }
-
-        if !all_paused {
-            // Addons do not generate independent runtime telemetry.
-        }
-
-        // ── Live editable CSS var updates (manifest.json watch) ──
+        // Editable CSS variable updates.
         if self.last_editable_tick.elapsed() >= Duration::from_millis(250) {
             self.last_editable_tick = Instant::now();
             self.check_editable_updates();
         }
 
+        // Pause evaluation.
         if self.last_pause_tick.elapsed() >= self.pause_check_interval {
             self.last_pause_tick = Instant::now();
-            unpaused_transition = self.sync_pause_state_now(all_paused);
+            let sysdata = self.bridge.get_sysdata_json();
+            let appdata = self.bridge.get_appdata_json();
+            unpaused_transition = self.sync_pause_state_now_with(all_paused, &sysdata, &appdata);
         }
 
-        // ── Periodic BMP save (no SPI call) ────────────────────────
-        // Keeps the snapshot file on disk fresh so that:
-        //   • The next startup SPI call shows a recent frame
-        //   • A Task-Manager kill leaves a recent fallback file
-        // Uses PrintWindow on wallpaper HWNDs (correct content, no app
-        // windows) and ships pixel buffers to a background thread for
-        // the expensive stitching + disk write.
+        // Render active wallpapers.
+        for hosted in &mut self.hosted {
+            if hosted.paused {
+                continue;
+            }
+            hosted.render_frame();
+        }
+
+        // Periodic BMP snapshot (keeps file fresh for crash recovery).
         if !all_paused && self.last_snapshot_tick.elapsed() >= Duration::from_secs(5) {
             self.last_snapshot_tick = Instant::now();
             self.save_snapshot_to_disk();
@@ -481,12 +573,8 @@ impl WallpaperRuntime {
         self.hosted.iter().all(|h| h.paused)
     }
 
-    /// Capture each hosted wallpaper via `PrintWindow` on the main thread,
-    /// then ship the raw pixel buffers to a background thread for stitching
-    /// + BMP save.  Does NOT call `SPI_SETDESKWALLPAPER`.
-    ///
-    /// The main-thread work is only `PrintWindow` + `GetDIBits` per monitor
-    /// (fast GDI calls).  Skips silently if the worker is still busy.
+    // ── Snapshot ───────────────────────────────────────────────────────
+
     pub fn save_snapshot_to_disk(&mut self) {
         if self.hosted.is_empty() || self.hosted.iter().all(|h| h.paused) {
             return;
@@ -506,9 +594,7 @@ impl WallpaperRuntime {
             let height = (hosted.monitor_rect.bottom - hosted.monitor_rect.top).max(1);
             match capture_window_bgra(hosted.hwnd, width, height) {
                 Ok(pixels) => captures.push((hosted.monitor_rect, pixels)),
-                Err(e) => {
-                    warn!("[WALLPAPER][SNAP] PrintWindow capture failed: {}", e);
-                }
+                Err(e) => warn!("[WALLPAPER][SNAP] PrintWindow capture failed: {}", e),
             }
         }
         if captures.is_empty() {
@@ -521,12 +607,9 @@ impl WallpaperRuntime {
         }
     }
 
-    /// Capture + save + apply as Windows wallpaper.  For shutdown only.
     pub fn shutdown_snapshot(&mut self) {
         match self.capture_paused_wallpaper_snapshot(true) {
-            Ok(()) => {
-                warn!("[WALLPAPER][SHUTDOWN] Captured and applied shutdown snapshot");
-            }
+            Ok(()) => warn!("[WALLPAPER][SHUTDOWN] Captured and applied shutdown snapshot"),
             Err(e) => {
                 warn!("[WALLPAPER][SHUTDOWN] Live capture failed ({}), falling back to saved BMP", e);
                 self.apply_snapshot_as_wallpaper();
@@ -534,9 +617,6 @@ impl WallpaperRuntime {
         }
     }
 
-    /// Apply the saved snapshot BMP as the Windows desktop wallpaper via
-    /// `SPI_SETDESKWALLPAPER`.  Safe to call before WorkerW children exist
-    /// (startup) or after they've been destroyed (shutdown).
     pub fn apply_snapshot_as_wallpaper(&self) {
         let snapshot_dir = sentinel_assets_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -545,22 +625,20 @@ impl WallpaperRuntime {
         let snapshot_path = snapshot_dir.join("paused_wallpaper_snapshot.bmp");
         if snapshot_path.exists() {
             match apply_windows_wallpaper(&snapshot_path) {
-                Ok(()) => {
-                    warn!(
-                        "[WALLPAPER][SHUTDOWN] Applied snapshot wallpaper: {}",
-                        snapshot_path.display()
-                    );
-                }
-                Err(e) => {
-                    warn!("[WALLPAPER][SHUTDOWN] Failed to apply snapshot wallpaper: {}", e);
-                }
+                Ok(()) => warn!(
+                    "[WALLPAPER][SHUTDOWN] Applied snapshot wallpaper: {}",
+                    snapshot_path.display()
+                ),
+                Err(e) => warn!(
+                    "[WALLPAPER][SHUTDOWN] Failed to apply snapshot wallpaper: {}",
+                    e
+                ),
             }
         }
     }
 
-    /// Re-enumerate monitors and return `true` if the layout (count or any
-    /// RECT) has changed since the last `apply()`.  This is cheap to call
-    /// periodically (a single Win32 `EnumDisplayMonitors` round-trip).
+    // ── Monitor change detection ───────────────────────────────────────
+
     pub fn monitors_changed(&self) -> bool {
         let current = enumerate_monitors();
         let current_rects: Vec<RECT> = current.iter().map(|m| m.rect).collect();
@@ -583,6 +661,8 @@ impl WallpaperRuntime {
         dirs
     }
 
+    // ── Hot reload ─────────────────────────────────────────────────────
+
     pub fn reload_wallpapers_for_asset_dir(&mut self, asset_dir: &Path) -> usize {
         let mut reloaded = 0usize;
         for hosted in &mut self.hosted {
@@ -590,58 +670,75 @@ impl WallpaperRuntime {
                 continue;
             }
 
-            let url = add_reload_nonce(&hosted.source_url);
-            let wide = to_wstring(&url);
-            let result = unsafe { hosted.webview.Navigate(PCWSTR(wide.as_ptr())) };
-            match result {
-                Ok(_) => {
+            // Recompile the scene from HTML/CSS.
+            let html = match fs::read_to_string(&hosted.source_path) {
+                Ok(h) => h,
+                Err(e) => {
+                    warn!(
+                        "[WALLPAPER][WATCHER] Failed to read '{}': {}",
+                        hosted.source_path.display(), e
+                    );
+                    continue;
+                }
+            };
+
+            let css_path = asset_dir.join("style.css");
+            let css = if css_path.exists() {
+                fs::read_to_string(&css_path).unwrap_or_default()
+            } else {
+                let alt_css = hosted.source_path.with_extension("css");
+                if alt_css.exists() {
+                    fs::read_to_string(&alt_css).unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            };
+
+            let name = asset_dir
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("wallpaper");
+
+            match compile_html(&html, &css, name, SceneType::Wallpaper, Some(asset_dir)) {
+                Ok(doc) => {
+                    hosted.scene.load_document(doc);
                     reloaded += 1;
+                    warn!(
+                        "[WALLPAPER][WATCHER] Recompiled scene for '{}'",
+                        asset_dir.display()
+                    );
                 }
                 Err(e) => {
                     warn!(
-                        "[WALLPAPER][WATCHER] Failed to reload wallpaper for '{}' via '{}': {:?}",
-                        hosted.asset_dir.display(),
-                        hosted.source_url,
-                        e
+                        "[WALLPAPER][WATCHER] Failed to recompile '{}': {}",
+                        asset_dir.display(), e
                     );
                 }
             }
         }
-
         reloaded
     }
 
     pub fn has_registry_snapshot(&self) -> bool {
-        !self.cached_sysdata.is_null() && !self.cached_appdata.is_null()
+        self.bridge.is_connected()
     }
 
-    fn current_demanded_sections(&self) -> HashSet<String> {
-        if !self.hosted.iter().any(|h| !h.paused) {
-            return HashSet::new();
-        }
-
-        [
-            "time", "cpu", "gpu", "ram", "storage", "displays", "network", "wifi",
-            "bluetooth", "audio", "keyboard", "mouse", "power", "idle", "system",
-            "processes", "appdata",
-        ]
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect()
-    }
-
-    fn send_tracking_demands(&self, demanded_sections: &HashSet<String>) {
-        let mut sections: Vec<String> = demanded_sections.iter().cloned().collect();
-        sections.sort();
-        let args = serde_json::json!({ "sections": sections });
-        let _ = request_quick("backend", "set_tracking_demands", Some(args));
-    }
+    // ── Pause system ───────────────────────────────────────────────────
 
     pub fn sync_pause_state_now(&mut self, all_paused_before: bool) -> bool {
+        let sysdata = self.bridge.get_sysdata_json();
+        let appdata = self.bridge.get_appdata_json();
+        self.sync_pause_state_now_with(all_paused_before, &sysdata, &appdata)
+    }
+
+    fn sync_pause_state_now_with(
+        &mut self,
+        all_paused_before: bool,
+        sysdata: &Value,
+        appdata: &Value,
+    ) -> bool {
         let paused_before: Vec<bool> = self.hosted.iter().map(|h| h.paused).collect();
-        let cached_sysdata = self.cached_sysdata.clone();
-        let cached_appdata = self.cached_appdata.clone();
-        let states_changed = self.evaluate_and_apply_pause(&cached_sysdata, &cached_appdata);
+        let states_changed = self.evaluate_and_apply_pause(sysdata, appdata);
         if !states_changed {
             return false;
         }
@@ -652,12 +749,21 @@ impl WallpaperRuntime {
             .zip(paused_before.iter())
             .any(|(hosted, was_paused)| !*was_paused && hosted.paused);
         let all_paused_now = self.hosted.iter().all(|h| h.paused);
+
         if any_new_paused {
             if let Err(e) = self.capture_paused_wallpaper_snapshot(all_paused_now) {
                 warn!("[WALLPAPER][PAUSE] Snapshot capture/apply failed: {}", e);
             }
         }
         self.apply_host_visibility();
+
+        // Pause/resume the bridge polling when all wallpapers are paused.
+        if all_paused_now {
+            self.bridge.pause();
+        } else {
+            self.bridge.resume();
+        }
+
         all_paused_before && !all_paused_now
     }
 
@@ -719,45 +825,20 @@ impl WallpaperRuntime {
             }
 
             let should_pause = idle_triggered
-                || mode_triggered(
-                    hosted.pause_focus_mode,
-                    local_states.focused,
-                    global_states.focused,
-                )
-                || mode_triggered(
-                    hosted.pause_maximized_mode,
-                    local_states.maximized,
-                    global_states.maximized,
-                )
-                || mode_triggered(
-                    hosted.pause_fullscreen_mode,
-                    local_states.fullscreen,
-                    global_states.fullscreen,
-                )
-                || mode_triggered(
-                    hosted.pause_battery_mode,
-                    on_battery,
-                    on_battery,
-                );
+                || mode_triggered(hosted.pause_focus_mode, local_states.focused, global_states.focused)
+                || mode_triggered(hosted.pause_maximized_mode, local_states.maximized, global_states.maximized)
+                || mode_triggered(hosted.pause_fullscreen_mode, local_states.fullscreen, global_states.fullscreen)
+                || mode_triggered(hosted.pause_battery_mode, on_battery, on_battery);
 
             if should_pause != hosted.paused {
                 hosted.paused = should_pause;
                 states_changed = true;
-                let payload = format!("{{\"type\":\"native_pause\",\"paused\":{}}}", should_pause);
-                let _ = post_webview_json(&hosted.webview, &payload);
                 if self.log_pause_state_changes {
                     warn!(
-                        "[WALLPAPER][PAUSE] monitor={:?} paused={} idle_triggered={} on_battery={} (local: focused={} maximized={} fullscreen={}; global: focused={} maximized={} fullscreen={})",
-                        hosted.monitor_id,
-                        should_pause,
-                        idle_triggered,
-                        on_battery,
-                        local_states.focused,
-                        local_states.maximized,
-                        local_states.fullscreen,
-                        global_states.focused,
-                        global_states.maximized,
-                        global_states.fullscreen
+                        "[WALLPAPER][PAUSE] monitor={:?} paused={} idle={} battery={} (local: f={} m={} fs={}; global: f={} m={} fs={})",
+                        hosted.monitor_id, should_pause, idle_triggered, on_battery,
+                        local_states.focused, local_states.maximized, local_states.fullscreen,
+                        global_states.focused, global_states.maximized, global_states.fullscreen
                     );
                 }
             }
@@ -767,18 +848,19 @@ impl WallpaperRuntime {
     }
 
     fn apply_host_visibility(&mut self) {
-        for hosted in &mut self.hosted {
+        for hosted in &self.hosted {
             unsafe {
-                let _ = hosted.controller.SetIsVisible(!hosted.paused);
+                let _ = ShowWindow(
+                    hosted.hwnd,
+                    if hosted.paused { SW_HIDE } else { SW_SHOW },
+                );
             }
         }
     }
 
-    /// Check each hosted wallpaper's manifest.json for editable changes.
-    /// When the editable section changes, push a `native_css_vars` message
-    /// containing all CSS variable updates to the affected WebView2 instances.
+    // ── Editable CSS variables ─────────────────────────────────────────
+
     fn check_editable_updates(&mut self) {
-        // Collect unique asset dirs
         let mut seen = HashSet::new();
         let mut dirs: Vec<PathBuf> = Vec::new();
         for h in &self.hosted {
@@ -788,51 +870,61 @@ impl WallpaperRuntime {
         }
 
         for dir in &dirs {
+            // Look for manifest.json or meta.json for the editable schema,
+            // and editable.yaml for user overrides.
             let manifest_path = dir.join("manifest.json");
-            let content = match fs::read_to_string(&manifest_path) {
+            let meta_path = dir.join("meta.json");
+            let editable_yaml = dir.join("editable.yaml");
+
+            let editable_source = if manifest_path.exists() {
+                &manifest_path
+            } else if meta_path.exists() {
+                // meta.json may not have editables; check editable.yaml instead
+                if editable_yaml.exists() {
+                    &manifest_path // EditableContext handles fallback
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            };
+
+            // Try to load the editable context.
+            let overrides_path = if editable_yaml.exists() {
+                Some(editable_yaml.as_path())
+            } else {
+                None
+            };
+
+            let ctx = match EditableContext::load(editable_source, overrides_path) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
 
-            let manifest: Value = match serde_json::from_str(&content) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let editable = match manifest.get("editable") {
-                Some(e) => e,
-                None => continue,
-            };
-
-            let editable_json = serde_json::to_string(editable).unwrap_or_default();
-
-            // Cache latest editable JSON for change tracking diagnostics; we still
-            // rebroadcast vars every tick so late-loading WebViews do not miss
-            // updates and fall back to default values.
+            // Inject CSS variables into scene graph document variables.
+            let css_vars_json = serde_json::to_string(&ctx.css_vars).unwrap_or_default();
             let unchanged = self
                 .editable_cache
                 .get(dir)
-                .map(|prev| *prev == editable_json)
+                .map(|prev| *prev == css_vars_json)
                 .unwrap_or(false);
-            if !unchanged {
-                self.editable_cache.insert(dir.clone(), editable_json);
-            }
-
-            // Extract CSS variable → value pairs from the editable tree
-            let vars = extract_css_vars(editable);
-            if vars.is_empty() {
+            if unchanged {
                 continue;
             }
+            self.editable_cache.insert(dir.clone(), css_vars_json);
 
-            let vars_obj = Value::Object(vars);
-            let payload = format!(
-                "{{\"type\":\"native_css_vars\",\"vars\":{}}}",
-                serde_json::to_string(&vars_obj).unwrap_or_else(|_| "{}".to_string())
-            );
-
-            for hosted in &self.hosted {
+            // Apply updated variables to all hosted wallpapers using this asset.
+            for hosted in &mut self.hosted {
                 if hosted.asset_dir == *dir {
-                    let _ = post_webview_json(&hosted.webview, &payload);
+                    for (var_name, var_value) in &ctx.css_vars {
+                        if let Some(entry) = hosted.scene.document.variables.iter_mut()
+                            .find(|(k, _)| k == var_name) {
+                            entry.1 = var_value.clone();
+                        } else {
+                            hosted.scene.document.variables.push((var_name.clone(), var_value.clone()));
+                        }
+                    }
+                    hosted.scene.invalidate_layout();
                 }
             }
         }
@@ -841,39 +933,25 @@ impl WallpaperRuntime {
     fn capture_paused_wallpaper_snapshot(
         &mut self,
         apply_to_desktop: bool,
-    ) -> std::result::Result<(), String> {
+    ) -> Result<(), String> {
         if self.hosted.is_empty() {
             return Ok(());
         }
 
-        let min_left = self
-            .hosted
-            .iter()
-            .map(|h| h.monitor_rect.left)
-            .min()
-            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
-        let min_top = self
-            .hosted
-            .iter()
-            .map(|h| h.monitor_rect.top)
-            .min()
-            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
-        let max_right = self
-            .hosted
-            .iter()
-            .map(|h| h.monitor_rect.right)
-            .max()
-            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
-        let max_bottom = self
-            .hosted
-            .iter()
-            .map(|h| h.monitor_rect.bottom)
-            .max()
-            .ok_or_else(|| "No hosted monitor bounds".to_string())?;
+        let min_left = self.hosted.iter().map(|h| h.monitor_rect.left).min()
+            .ok_or("No hosted monitor bounds")?;
+        let min_top = self.hosted.iter().map(|h| h.monitor_rect.top).min()
+            .ok_or("No hosted monitor bounds")?;
+        let max_right = self.hosted.iter().map(|h| h.monitor_rect.right).max()
+            .ok_or("No hosted monitor bounds")?;
+        let max_bottom = self.hosted.iter().map(|h| h.monitor_rect.bottom).max()
+            .ok_or("No hosted monitor bounds")?;
 
         let virtual_width = (max_right - min_left).max(1);
         let virtual_height = (max_bottom - min_top).max(1);
-        let mut stitched = RgbaImage::from_pixel(virtual_width as u32, virtual_height as u32, Rgba([0, 0, 0, 255]));
+        let mut stitched = RgbaImage::from_pixel(
+            virtual_width as u32, virtual_height as u32, Rgba([0, 0, 0, 255]),
+        );
         let mut has_non_black_pixel = false;
 
         for hosted in &self.hosted {
@@ -886,15 +964,11 @@ impl WallpaperRuntime {
             for y in 0..height {
                 for x in 0..width {
                     let src = ((y * width + x) * 4) as usize;
-                    if src + 3 >= pixels.len() {
-                        continue;
-                    }
+                    if src + 3 >= pixels.len() { continue; }
                     let b = pixels[src];
                     let g = pixels[src + 1];
                     let r = pixels[src + 2];
-                    if r != 0 || g != 0 || b != 0 {
-                        has_non_black_pixel = true;
-                    }
+                    if r != 0 || g != 0 || b != 0 { has_non_black_pixel = true; }
                     let dst_x = (offset_x + x) as u32;
                     let dst_y = (offset_y + y) as u32;
                     if dst_x < stitched.width() && dst_y < stitched.height() {
@@ -905,7 +979,7 @@ impl WallpaperRuntime {
         }
 
         if !has_non_black_pixel {
-            return Err("Captured wallpaper frame is fully black; refusing to apply snapshot wallpaper".to_string());
+            return Err("Captured frame is fully black; refusing snapshot".to_string());
         }
 
         let snapshot_dir = sentinel_assets_dir()
@@ -920,24 +994,19 @@ impl WallpaperRuntime {
 
         if apply_to_desktop {
             apply_windows_wallpaper(&snapshot_path)?;
-            self.last_pause_snapshot_path = Some(snapshot_path.clone());
             if self.log_pause_state_changes {
-                warn!(
-                    "[WALLPAPER][PAUSE] Applied snapshot wallpaper: {}",
-                    snapshot_path.display()
-                );
+                warn!("[WALLPAPER][PAUSE] Applied snapshot: {}", snapshot_path.display());
             }
         } else if self.log_pause_state_changes {
-            warn!(
-                "[WALLPAPER][PAUSE] Captured snapshot only (desktop unchanged): {}",
-                snapshot_path.display()
-            );
+            warn!("[WALLPAPER][PAUSE] Snapshot saved (no apply): {}", snapshot_path.display());
         }
         Ok(())
     }
 }
 
-fn capture_window_bgra(hwnd: HWND, width: i32, height: i32) -> std::result::Result<Vec<u8>, String> {
+// ── Free functions ─────────────────────────────────────────────────────────
+
+fn capture_window_bgra(hwnd: HWND, width: i32, height: i32) -> Result<Vec<u8>, String> {
     unsafe {
         let src_dc = GetDC(Some(hwnd));
         if src_dc.0.is_null() {
@@ -974,13 +1043,9 @@ fn capture_window_bgra(hwnd: HWND, width: i32, height: i32) -> std::result::Resu
 
         let mut pixels = vec![0u8; (width * height * 4) as usize];
         let lines = GetDIBits(
-            mem_dc,
-            bitmap,
-            0,
-            height as u32,
+            mem_dc, bitmap, 0, height as u32,
             Some(pixels.as_mut_ptr() as *mut core::ffi::c_void),
-            &mut bmi,
-            DIB_RGB_COLORS,
+            &mut bmi, DIB_RGB_COLORS,
         );
 
         let _ = SelectObject(mem_dc, old);
@@ -996,14 +1061,10 @@ fn capture_window_bgra(hwnd: HWND, width: i32, height: i32) -> std::result::Resu
     }
 }
 
-/// Background thread that stitches raw pixel captures into an RgbaImage
-/// and saves the BMP to disk.  No SPI call — just keeps the file fresh.
 fn snapshot_worker(rx: mpsc::Receiver<SnapshotJob>) {
     while let Ok(job) = rx.recv() {
         let mut stitched = RgbaImage::from_pixel(
-            job.virtual_width as u32,
-            job.virtual_height as u32,
-            Rgba([0, 0, 0, 255]),
+            job.virtual_width as u32, job.virtual_height as u32, Rgba([0, 0, 0, 255]),
         );
         let mut has_non_black_pixel = false;
 
@@ -1030,14 +1091,11 @@ fn snapshot_worker(rx: mpsc::Receiver<SnapshotJob>) {
             }
         }
 
-        if !has_non_black_pixel {
-            continue;
-        }
+        if !has_non_black_pixel { continue; }
 
         let snapshot_dir = sentinel_assets_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("wallpaper")
-            .join("snapshots");
+            .join("wallpaper").join("snapshots");
         let _ = fs::create_dir_all(&snapshot_dir);
         let snapshot_path = snapshot_dir.join("paused_wallpaper_snapshot.bmp");
         if let Err(e) = stitched.save(&snapshot_path) {
@@ -1046,18 +1104,19 @@ fn snapshot_worker(rx: mpsc::Receiver<SnapshotJob>) {
     }
 }
 
-fn apply_windows_wallpaper(path: &Path) -> std::result::Result<(), String> {
+fn apply_windows_wallpaper(path: &Path) -> Result<(), String> {
     let wide = to_wstring(path.to_string_lossy().as_ref());
     unsafe {
         SystemParametersInfoW(
-            SPI_SETDESKWALLPAPER,
-            0,
+            SPI_SETDESKWALLPAPER, 0,
             Some(wide.as_ptr() as *mut core::ffi::c_void),
             SPIF_UPDATEINIFILE | SPIF_SENDCHANGE,
         )
-        .map_err(|e| format!("SystemParametersInfoW(SPI_SETDESKWALLPAPER) failed: {e:?}"))
+        .map_err(|e| format!("SPI_SETDESKWALLPAPER failed: {e:?}"))
     }
 }
+
+// ── Pause helpers ──────────────────────────────────────────────────────────
 
 #[derive(Default, Clone, Copy)]
 struct MonitorWindowStates {
@@ -1087,37 +1146,22 @@ fn monitor_window_states(appdata: &Value, monitor_id: &str) -> MonitorWindowStat
         .and_then(|v| v.as_array());
 
     let mut states = MonitorWindowStates::default();
-    let Some(windows) = windows else {
-        return states;
-    };
+    let Some(windows) = windows else { return states; };
 
     for window in windows {
         let (focused, maximized, fullscreen) = window_flags(window);
-
-        if focused {
-            states.focused = true;
-        }
-        if maximized {
-            states.maximized = true;
-        }
-        if fullscreen {
-            states.fullscreen = true;
-        }
+        if focused { states.focused = true; }
+        if maximized { states.maximized = true; }
+        if fullscreen { states.fullscreen = true; }
     }
-
     states
 }
 
 fn foreground_window_snapshot() -> Option<ForegroundWindowSnapshot> {
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.0.is_null() {
-            return None;
-        }
-
-        if is_shell_foreground_window(hwnd) {
-            return None;
-        }
+        if hwnd.0.is_null() { return None; }
+        if is_shell_foreground_window(hwnd) { return None; }
 
         let mut states = MonitorWindowStates {
             focused: true,
@@ -1127,27 +1171,18 @@ fn foreground_window_snapshot() -> Option<ForegroundWindowSnapshot> {
 
         let mut rect = RECT::default();
         if GetWindowRect(hwnd, &mut rect).is_err() {
-            return Some(ForegroundWindowSnapshot {
-                monitor_rect: RECT::default(),
-                states,
-            });
+            return Some(ForegroundWindowSnapshot { monitor_rect: RECT::default(), states });
         }
 
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
         if monitor.0.is_null() {
-            return Some(ForegroundWindowSnapshot {
-                monitor_rect: RECT::default(),
-                states,
-            });
+            return Some(ForegroundWindowSnapshot { monitor_rect: RECT::default(), states });
         }
 
         let mut mi_ex: MONITORINFOEXW = std::mem::zeroed();
         mi_ex.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
         if GetMonitorInfoW(monitor, &mut mi_ex.monitorInfo).0 == 0 {
-            return Some(ForegroundWindowSnapshot {
-                monitor_rect: RECT::default(),
-                states,
-            });
+            return Some(ForegroundWindowSnapshot { monitor_rect: RECT::default(), states });
         }
 
         let monitor_rc = mi_ex.monitorInfo.rcMonitor;
@@ -1161,19 +1196,14 @@ fn foreground_window_snapshot() -> Option<ForegroundWindowSnapshot> {
         let has_frame = (style & (WS_CAPTION.0 | WS_THICKFRAME.0)) != 0;
         states.fullscreen = covers_monitor && !has_frame;
 
-        Some(ForegroundWindowSnapshot {
-            monitor_rect: monitor_rc,
-            states,
-        })
+        Some(ForegroundWindowSnapshot { monitor_rect: monitor_rc, states })
     }
 }
 
 fn is_shell_foreground_window(hwnd: HWND) -> bool {
     let mut class_buf = [0u16; 256];
     let len = unsafe { GetClassNameW(hwnd, &mut class_buf) };
-    if len <= 0 {
-        return false;
-    }
+    if len <= 0 { return false; }
 
     let class_name = String::from_utf16_lossy(&class_buf[..len as usize]).to_ascii_lowercase();
     matches!(
@@ -1183,20 +1213,10 @@ fn is_shell_foreground_window(hwnd: HWND) -> bool {
 }
 
 fn window_flags(window: &Value) -> (bool, bool, bool) {
-    let focused = window
-        .get("focused")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let state = window
-        .get("window_state")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_lowercase();
-
+    let focused = window.get("focused").and_then(|v| v.as_bool()).unwrap_or(false);
+    let state = window.get("window_state").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
     let maximized = state.contains("maximized") || state.contains("maximised");
     let fullscreen = state.contains("fullscreen") || state.contains("full screen");
-
     (focused, maximized, fullscreen)
 }
 
@@ -1222,56 +1242,39 @@ fn resolve_monitor_id_for_rect(sysdata: &Value, rect: RECT) -> Option<String> {
         let y = metadata.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let width = metadata.get("width").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let height = metadata.get("height").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        if width <= 0 || height <= 0 { continue; }
 
-        if width <= 0 || height <= 0 {
-            continue;
-        }
-
-        let id = display
-            .get("id")
-            .and_then(|v| v.as_str())
+        let id = display.get("id").and_then(|v| v.as_str())
             .or_else(|| metadata.get("id").and_then(|v| v.as_str()))
-            .map(|v| v.to_string());
+            .map(String::from);
+        let Some(id) = id else { continue; };
 
-        let Some(id) = id else {
-            continue;
-        };
-
-        let display_rect = RECT {
-            left: x,
-            top: y,
-            right: x + width,
-            bottom: y + height,
-        };
+        let display_rect = RECT { left: x, top: y, right: x + width, bottom: y + height };
 
         let overlap_left = rect.left.max(display_rect.left);
         let overlap_top = rect.top.max(display_rect.top);
         let overlap_right = rect.right.min(display_rect.right);
         let overlap_bottom = rect.bottom.min(display_rect.bottom);
-        let overlap_w = (overlap_right - overlap_left).max(0) as i64;
-        let overlap_h = (overlap_bottom - overlap_top).max(0) as i64;
-        let overlap_area = overlap_w * overlap_h;
+        let overlap_area = (overlap_right - overlap_left).max(0) as i64
+            * (overlap_bottom - overlap_top).max(0) as i64;
 
         if overlap_area > best_overlap {
             best_overlap = overlap_area;
             best_overlap_id = Some(id.clone());
         }
 
-        let rect_center_x = ((rect.left + rect.right) / 2) as i64;
-        let rect_center_y = ((rect.top + rect.bottom) / 2) as i64;
-        let display_center_x = ((display_rect.left + display_rect.right) / 2) as i64;
-        let display_center_y = ((display_rect.top + display_rect.bottom) / 2) as i64;
-        let distance = (rect_center_x - display_center_x).abs() + (rect_center_y - display_center_y).abs();
+        let cx = ((rect.left + rect.right) / 2) as i64;
+        let cy = ((rect.top + rect.bottom) / 2) as i64;
+        let dx = ((display_rect.left + display_rect.right) / 2) as i64;
+        let dy = ((display_rect.top + display_rect.bottom) / 2) as i64;
+        let distance = (cx - dx).abs() + (cy - dy).abs();
         if distance < best_distance {
             best_distance = distance;
             nearest_id = Some(id);
         }
     }
 
-    if best_overlap > 0 {
-        return best_overlap_id;
-    }
-
+    if best_overlap > 0 { return best_overlap_id; }
     best_overlap_id.or(nearest_id)
 }
 
@@ -1281,107 +1284,138 @@ fn power_on_battery(sysdata: &Value) -> bool {
         None => return false,
     };
 
-    let ac_status = power
-        .get("ac_status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_lowercase();
+    let ac_status = power.get("ac_status").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
 
-    if matches!(ac_status.as_str(), "online" | "ac" | "plugged" | "plugged_in") {
-        return false;
-    }
+    if matches!(ac_status.as_str(), "online" | "ac" | "plugged" | "plugged_in") { return false; }
+    if matches!(ac_status.as_str(), "offline" | "battery" | "on_battery") { return true; }
 
-    if matches!(ac_status.as_str(), "offline" | "battery" | "on_battery") {
-        return true;
-    }
-
-    power
-        .get("battery")
-        .and_then(|battery| battery.get("present"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-        && !power
-            .get("battery")
-            .and_then(|battery| battery.get("charging"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
+    power.get("battery").and_then(|b| b.get("present")).and_then(|v| v.as_bool()).unwrap_or(false)
+        && !power.get("battery").and_then(|b| b.get("charging")).and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
-fn build_registry_snapshot_and_payload(sections: &HashSet<String>) -> Option<(Value, Value, String)> {
-    // Single IPC round-trip using the combined `snapshot` command.
-    // Uses request_quick (no retries) so the tick loop never blocks for seconds.
-    let mut section_list: Vec<String> = sections.iter().cloned().collect();
-    section_list.sort();
-    let args = serde_json::json!({ "sections": section_list });
-    let snapshot_raw = request_quick("registry", "snapshot", Some(args))?;
-    let snapshot: Value = serde_json::from_str(&snapshot_raw).ok()?;
+fn global_window_states(appdata: &Value) -> Option<MonitorWindowStates> {
+    let app_map = appdata.as_object()?;
+    let mut states = MonitorWindowStates::default();
+    let mut found = false;
 
-    let sysdata = snapshot.get("sysdata").cloned().unwrap_or(Value::Null);
-    let appdata = snapshot.get("appdata").cloned().unwrap_or(Value::Null);
+    for entry in app_map.values() {
+        for window in entry.get("windows").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+            let (focused, maximized, fullscreen) = window_flags(&window);
+            if focused { states.focused = true; found = true; }
+            if maximized { states.maximized = true; found = true; }
+            if fullscreen { states.fullscreen = true; found = true; }
+        }
+    }
 
-    let payload = serde_json::json!({
-        "type": "native_registry",
-        "sysdata": sysdata,
-        "appdata": appdata,
-    })
-    .to_string();
-
-    Some((sysdata, appdata, payload))
+    if found { Some(states) } else { None }
 }
 
-fn post_webview_json(webview: &ICoreWebView2, payload: &str) -> std::result::Result<(), String> {
-    let payload_wide = to_wstring(payload);
+fn is_shell_foreground_active() -> bool {
     unsafe {
-        webview
-            .PostWebMessageAsJson(PCWSTR(payload_wide.as_ptr()))
-            .map_err(|e| format!("WebView2 PostWebMessageAsJson failed: {e:?}"))
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() { return true; }
+        is_shell_foreground_window(hwnd)
     }
 }
 
-/// Walk the editable tree from manifest.json and collect { "--css-var": "value" } pairs.
-fn extract_css_vars(editable: &Value) -> serde_json::Map<String, Value> {
-    let mut vars = serde_json::Map::new();
-    let obj = match editable.as_object() {
-        Some(o) => o,
-        None => return vars,
-    };
+// ── Asset resolution ───────────────────────────────────────────────────────
 
-    for (_key, entry) in obj {
-        if let Some(variable) = entry.get("variable").and_then(|v| v.as_str()) {
-            // Direct editable with a variable
-            if let Some(value) = entry.get("value") {
-                vars.insert(variable.to_string(), Value::String(value_to_css_string(value)));
+fn fetch_wallpaper_assets(bridge: &SentinelBridge) -> Vec<RegistryAsset> {
+    // Try IPC first.
+    if let Ok(raw) = bridge.list_assets() {
+        if let Ok(entries) = serde_json::from_value::<Vec<RegistryAsset>>(raw.clone()) {
+            let filtered: Vec<RegistryAsset> = entries
+                .into_iter()
+                .filter(|e| e.category.eq_ignore_ascii_case("wallpaper"))
+                .collect();
+            if !filtered.is_empty() {
+                return filtered;
             }
-        } else if let Some(sub_obj) = entry.as_object() {
-            // Group — iterate sub-entries (skip non-object fields like "name", "description")
-            for (_sub_key, sub) in sub_obj {
-                if let Some(variable) = sub.get("variable").and_then(|v| v.as_str()) {
-                    if let Some(value) = sub.get("value") {
-                        vars.insert(variable.to_string(), Value::String(value_to_css_string(value)));
+        } else if let Some(grouped) = raw.as_object() {
+            let mut flattened = Vec::<RegistryAsset>::new();
+            for (category, arr) in grouped {
+                if !category.eq_ignore_ascii_case("wallpaper") { continue; }
+                if let Some(items) = arr.as_array() {
+                    for item in items {
+                        if let Ok(mut asset) = serde_json::from_value::<RegistryAsset>(item.clone()) {
+                            if asset.category.is_empty() { asset.category = category.clone(); }
+                            flattened.push(asset);
+                        }
                     }
+                }
+            }
+            if !flattened.is_empty() {
+                return flattened;
+            }
+        }
+    }
+
+    warn!("[WALLPAPER] IPC list_assets unavailable");
+    Vec::new()
+}
+
+fn resolve_asset<'a>(assets: &'a [RegistryAsset], wallpaper_id: &str) -> Option<&'a RegistryAsset> {
+    assets.iter().find(|a| a.id == wallpaper_id)
+}
+
+fn resolve_target_monitors<'a>(
+    monitors: &'a [MonitorArea],
+    keys: &[String],
+    assigned_monitors: &HashSet<usize>,
+) -> Vec<&'a MonitorArea> {
+    let mut result = Vec::<&MonitorArea>::new();
+
+    if keys.iter().any(|key| key.eq_ignore_ascii_case("p")) {
+        if let Some(primary) = monitors.iter().find(|m| m.primary) {
+            result.push(primary);
+        }
+    }
+
+    for key in keys {
+        if key == "*" || key.eq_ignore_ascii_case("p") { continue; }
+        if let Ok(index) = key.parse::<usize>() {
+            if let Some(monitor) = monitors.get(index) {
+                if assigned_monitors.contains(&monitor.index) { continue; }
+                if !result.iter().any(|m| m.index == monitor.index) {
+                    result.push(monitor);
                 }
             }
         }
     }
 
-    vars
-}
-
-/// Convert a serde_json Value to a CSS-appropriate string.
-fn value_to_css_string(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        _ => value.to_string(),
+    if keys.iter().any(|key| key == "*") {
+        for monitor in monitors {
+            if assigned_monitors.contains(&monitor.index) { continue; }
+            if !result.iter().any(|m| m.index == monitor.index) {
+                result.push(monitor);
+            }
+        }
     }
+
+    result
 }
 
-fn ensure_host_class() -> std::result::Result<(), String> {
+fn profile_priority(profile: &WallpaperConfig) -> u8 {
+    if profile.monitor_index.iter().any(|key| key.eq_ignore_ascii_case("p")) { return 0; }
+    if profile.monitor_index.iter().any(|key| key == "*") { return 2; }
+    1
+}
+
+fn make_span_monitor_area(monitors: &[&MonitorArea]) -> MonitorArea {
+    let left = monitors.iter().map(|m| m.rect.left).min().unwrap_or(0);
+    let top = monitors.iter().map(|m| m.rect.top).min().unwrap_or(0);
+    let right = monitors.iter().map(|m| m.rect.right).max().unwrap_or(0);
+    let bottom = monitors.iter().map(|m| m.rect.bottom).max().unwrap_or(0);
+    let primary = monitors.iter().any(|m| m.primary);
+    let index = monitors.iter().map(|m| m.index).min().unwrap_or(0);
+    MonitorArea { index, primary, rect: RECT { left, top, right, bottom } }
+}
+
+// ── Win32 window helpers ───────────────────────────────────────────────────
+
+fn ensure_host_class() -> Result<(), String> {
     static CLASS_ONCE: OnceLock<bool> = OnceLock::new();
-    if CLASS_ONCE.get().is_some() {
-        return Ok(());
-    }
+    if CLASS_ONCE.get().is_some() { return Ok(()); }
 
     let hinstance = unsafe {
         GetModuleHandleW(None)
@@ -1396,36 +1430,24 @@ fn ensure_host_class() -> std::result::Result<(), String> {
         ..Default::default()
     };
 
-    unsafe {
-        let _ = RegisterClassW(&wc);
-    }
-
+    unsafe { let _ = RegisterClassW(&wc); }
     let _ = CLASS_ONCE.set(true);
     Ok(())
 }
 
 unsafe extern "system" fn host_window_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
+    hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM,
 ) -> LRESULT {
     DefWindowProcW(hwnd, msg, wparam, lparam)
 }
 
-fn create_desktop_child_window(worker: HWND, parent_rect: RECT, rect: RECT) -> std::result::Result<HWND, String> {
+fn create_desktop_child_window(
+    worker: HWND, parent_rect: RECT, rect: RECT,
+) -> Result<HWND, String> {
     let x = rect.left - parent_rect.left;
     let y = rect.top - parent_rect.top;
     let width = rect.right - rect.left;
     let height = rect.bottom - rect.top;
-    warn!(
-        "[WALLPAPER][HOST] creating child window parent={:?} pos=({}, {}) size={}x{}",
-        worker,
-        x,
-        y,
-        width,
-        height
-    );
 
     let style = WINDOW_STYLE((WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN).0);
     let ex_style = WINDOW_EX_STYLE((WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE).0);
@@ -1433,23 +1455,14 @@ fn create_desktop_child_window(worker: HWND, parent_rect: RECT, rect: RECT) -> s
     let hinstance = unsafe {
         GetModuleHandleW(None)
             .map(|h| HINSTANCE(h.0))
-            .map_err(|e| format!("GetModuleHandleW failed: {e:?}"))?
+            .map_err(|e| format!("GetModuleHandleW: {e:?}"))?
     };
 
     let hwnd = unsafe {
         CreateWindowExW(
-            ex_style,
-            HOST_CLASS_NAME,
-            PCWSTR::null(),
-            style,
-            x,
-            y,
-            width,
-            height,
-            Some(worker),
-            None,
-            Some(hinstance),
-            Some(ptr::null()),
+            ex_style, HOST_CLASS_NAME, PCWSTR::null(), style,
+            x, y, width, height,
+            Some(worker), None, Some(hinstance), Some(ptr::null()),
         )
     }
     .map_err(|e| format!("CreateWindowExW failed: {e:?}"))?;
@@ -1460,15 +1473,11 @@ fn create_desktop_child_window(worker: HWND, parent_rect: RECT, rect: RECT) -> s
 fn window_rect(hwnd: HWND) -> Option<RECT> {
     unsafe {
         let mut rect = RECT::default();
-        if GetWindowRect(hwnd, &mut rect).is_ok() {
-            Some(rect)
-        } else {
-            None
-        }
+        if GetWindowRect(hwnd, &mut rect).is_ok() { Some(rect) } else { None }
     }
 }
 
-fn apply_host_style(hwnd: HWND, z_index: &str) -> std::result::Result<(), String> {
+fn apply_host_style(hwnd: HWND, z_index: &str) -> Result<(), String> {
     unsafe {
         let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
         let mut new_style = style
@@ -1489,352 +1498,25 @@ fn apply_host_style(hwnd: HWND, z_index: &str) -> std::result::Result<(), String
             "topmost" | "overlay" => HWND_TOPMOST,
             _ => HWND_BOTTOM,
         };
-        warn!(
-            "[WALLPAPER][STYLE] hwnd={:?} old_style=0x{:X} new_style=0x{:X} old_ex=0x{:X} new_ex=0x{:X}",
-            hwnd,
-            style,
-            new_style,
-            ex_style,
-            new_ex
-        );
-        warn!("[WALLPAPER][STYLE] insert_after={:?}", insert_after);
 
         if SetWindowPos(
-            hwnd,
-            Some(insert_after),
-            0,
-            0,
-            0,
-            0,
+            hwnd, Some(insert_after), 0, 0, 0, 0,
             SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
-        )
-        .is_err()
-        {
-            return Err("SetWindowPos failed for host style".to_string());
+        ).is_err() {
+            return Err("SetWindowPos failed".to_string());
         }
     }
-
     Ok(())
-}
-
-fn create_webview_controller(
-    hwnd: HWND,
-    rect: RECT,
-    url: &str,
-) -> std::result::Result<ICoreWebView2Controller, String> {
-    warn!("[WALLPAPER][WEBVIEW] creating environment for hwnd={:?}", hwnd);
-    let environment = {
-        let (tx, rx) = mpsc::channel();
-
-        webview2_com::CreateCoreWebView2EnvironmentCompletedHandler::wait_for_async_operation(
-            Box::new(|handler| unsafe {
-                CreateCoreWebView2Environment(&handler).map_err(webview2_com::Error::WindowsError)
-            }),
-            Box::new(move |error_code, environment| {
-                error_code?;
-                tx.send(environment.ok_or_else(|| windows::core::Error::from(E_POINTER)))
-                    .expect("send WebView2 environment");
-                Ok(())
-            }),
-        )
-        .map_err(|e| format!("CreateCoreWebView2Environment failed: {e:?}"))?;
-
-        rx.recv()
-            .map_err(|_| "Failed to receive WebView2 environment".to_string())?
-            .map_err(|e| format!("WebView2 environment unavailable: {e:?}"))?
-    };
-    warn!("[WALLPAPER][WEBVIEW] environment ready for hwnd={:?}", hwnd);
-
-    let controller = {
-        let (tx, rx) = mpsc::channel();
-
-        webview2_com::CreateCoreWebView2ControllerCompletedHandler::wait_for_async_operation(
-            Box::new(move |handler| unsafe {
-                environment
-                    .CreateCoreWebView2Controller(hwnd, &handler)
-                    .map_err(webview2_com::Error::WindowsError)
-            }),
-            Box::new(move |error_code, controller| {
-                error_code?;
-                tx.send(controller.ok_or_else(|| windows::core::Error::from(E_POINTER)))
-                    .expect("send WebView2 controller");
-                Ok(())
-            }),
-        )
-        .map_err(|e| format!("CreateCoreWebView2Controller failed: {e:?}"))?;
-
-        rx.recv()
-            .map_err(|_| "Failed to receive WebView2 controller".to_string())?
-            .map_err(|e| format!("WebView2 controller unavailable: {e:?}"))?
-    };
-    warn!("[WALLPAPER][WEBVIEW] controller ready for hwnd={:?}", hwnd);
-
-    unsafe {
-        let width = rect.right - rect.left;
-        let height = rect.bottom - rect.top;
-        warn!(
-            "[WALLPAPER][WEBVIEW] setting bounds {}x{} and navigating to '{}'",
-            width,
-            height,
-            url
-        );
-        controller
-            .SetBounds(RECT {
-                left: 0,
-                top: 0,
-                right: width,
-                bottom: height,
-            })
-            .map_err(|e| format!("WebView2 SetBounds failed: {e:?}"))?;
-
-        controller
-            .SetIsVisible(true)
-            .map_err(|e| format!("WebView2 SetIsVisible failed: {e:?}"))?;
-
-        let webview = controller
-            .CoreWebView2()
-            .map_err(|e| format!("WebView2 CoreWebView2 unavailable: {e:?}"))?;
-
-        let url_wide = to_wstring(url);
-        webview
-            .Navigate(PCWSTR(url_wide.as_ptr()))
-            .map_err(|e| format!("WebView2 Navigate failed for '{}': {e:?}", url))?;
-    }
-    warn!("[WALLPAPER][WEBVIEW] navigation submitted successfully");
-
-    Ok(controller)
-}
-
-fn fetch_wallpaper_assets() -> Vec<RegistryAsset> {
-    if let Some(raw) = request("registry", "list_assets", None) {
-        if let Ok(entries) = serde_json::from_str::<Vec<RegistryAsset>>(&raw) {
-            let filtered: Vec<RegistryAsset> = entries
-                .into_iter()
-                .filter(|e| e.category.eq_ignore_ascii_case("wallpaper"))
-                .collect();
-
-            if !filtered.is_empty() {
-                return filtered;
-            }
-        } else if let Ok(grouped) = serde_json::from_str::<serde_json::Map<String, Value>>(&raw) {
-            let mut flattened = Vec::<RegistryAsset>::new();
-            for (category, arr) in grouped {
-                if !category.eq_ignore_ascii_case("wallpaper") {
-                    continue;
-                }
-                if let Some(items) = arr.as_array() {
-                    for item in items {
-                        if let Ok(mut asset) = serde_json::from_value::<RegistryAsset>(item.clone()) {
-                            if asset.category.is_empty() {
-                                asset.category = category.clone();
-                            }
-                            flattened.push(asset);
-                        }
-                    }
-                }
-            }
-            if !flattened.is_empty() {
-                return flattened;
-            }
-        } else {
-            warn!("[WALLPAPER] Failed to parse registry list_assets payload");
-        }
-    } else {
-        warn!("[WALLPAPER] IPC list_assets request failed");
-    }
-
-    Vec::new()
-}
-
-fn resolve_asset<'a>(assets: &'a [RegistryAsset], wallpaper_id: &str) -> Option<&'a RegistryAsset> {
-    assets.iter().find(|a| a.id == wallpaper_id)
-}
-
-fn resolve_asset_url(asset: &RegistryAsset) -> Option<String> {
-    if let Some(url) = asset.metadata.get("url").and_then(|v| v.as_str()) {
-        return Some(url.to_string());
-    }
-
-    let local_html = asset.path.join("index.html");
-    if local_html.exists() {
-        return Some(path_to_file_url(&local_html));
-    }
-
-    None
-}
-
-fn resolve_target_monitors<'a>(
-    monitors: &'a [MonitorArea],
-    keys: &[String],
-    assigned_monitors: &HashSet<usize>,
-) -> Vec<&'a MonitorArea> {
-    let mut result = Vec::<&MonitorArea>::new();
-
-    if keys.iter().any(|key| key.eq_ignore_ascii_case("p")) {
-        if let Some(primary) = monitors.iter().find(|monitor| monitor.primary) {
-            result.push(primary);
-        }
-    }
-
-    for key in keys {
-        if key == "*" || key.eq_ignore_ascii_case("p") {
-            continue;
-        }
-
-        if let Ok(index) = key.parse::<usize>() {
-            if let Some(monitor) = monitors.get(index) {
-                if assigned_monitors.contains(&monitor.index) {
-                    continue;
-                }
-                if !result.iter().any(|m| m.index == monitor.index) {
-                    result.push(monitor);
-                }
-            }
-        }
-    }
-
-    if keys.iter().any(|key| key == "*") {
-        for monitor in monitors {
-            if assigned_monitors.contains(&monitor.index) {
-                continue;
-            }
-            if !result.iter().any(|m| m.index == monitor.index) {
-                result.push(monitor);
-            }
-        }
-    }
-
-    result
-}
-
-fn path_to_file_url(path: &Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    format!("file:///{normalized}")
-}
-
-fn enumerate_monitors() -> Vec<MonitorArea> {
-    unsafe extern "system" fn enum_monitor_proc(
-        monitor: HMONITOR,
-        _hdc: HDC,
-        _rect: *mut RECT,
-        lparam: LPARAM,
-    ) -> BOOL {
-        let vec = &mut *(lparam.0 as *mut Vec<MonitorArea>);
-
-        let mut info: MONITORINFOEXW = mem::zeroed();
-        info.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
-
-        if GetMonitorInfoW(monitor, &mut info as *mut MONITORINFOEXW as *mut _).as_bool() {
-            vec.push(MonitorArea {
-                index: vec.len(),
-                primary: info.monitorInfo.dwFlags != 0,
-                rect: info.monitorInfo.rcMonitor,
-            });
-        }
-
-        BOOL(1)
-    }
-
-    let mut monitors = Vec::<MonitorArea>::new();
-    unsafe {
-        let _ = EnumDisplayMonitors(
-            None,
-            None,
-            Some(enum_monitor_proc),
-            LPARAM((&mut monitors as *mut Vec<MonitorArea>) as isize),
-        );
-    }
-
-    if monitors.len() > 1 {
-        let min_height = monitors
-            .iter()
-            .map(|m| (m.rect.bottom - m.rect.top).max(1))
-            .min()
-            .unwrap_or(1);
-        let row_tolerance = (min_height / 4).max(80);
-
-        monitors.sort_by(|a, b| b.rect.top.cmp(&a.rect.top));
-
-        let mut rows: Vec<(i32, Vec<MonitorArea>)> = Vec::new();
-        for monitor in monitors.into_iter() {
-            if let Some((_, row)) = rows
-                .iter_mut()
-                .find(|(anchor_y, _)| (monitor.rect.top - *anchor_y).abs() <= row_tolerance)
-            {
-                row.push(monitor);
-            } else {
-                rows.push((monitor.rect.top, vec![monitor]));
-            }
-        }
-
-        rows.sort_by(|(ay, _), (by, _)| by.cmp(ay));
-
-        let mut flattened = Vec::<MonitorArea>::new();
-        for (_, mut row) in rows {
-            row.sort_by(|a, b| a.rect.left.cmp(&b.rect.left));
-            flattened.extend(row);
-        }
-
-        monitors = flattened;
-    }
-
-    for (index, monitor) in monitors.iter_mut().enumerate() {
-        monitor.index = index;
-    }
-
-    monitors
-}
-
-fn profile_priority(profile: &WallpaperConfig) -> u8 {
-    if profile
-        .monitor_index
-        .iter()
-        .any(|key| key.eq_ignore_ascii_case("p"))
-    {
-        return 0;
-    }
-
-    if profile.monitor_index.iter().any(|key| key == "*") {
-        return 2;
-    }
-
-    1
-}
-
-fn make_span_monitor_area(monitors: &[&MonitorArea]) -> MonitorArea {
-    let left = monitors.iter().map(|m| m.rect.left).min().unwrap_or(0);
-    let top = monitors.iter().map(|m| m.rect.top).min().unwrap_or(0);
-    let right = monitors.iter().map(|m| m.rect.right).max().unwrap_or(0);
-    let bottom = monitors.iter().map(|m| m.rect.bottom).max().unwrap_or(0);
-    let primary = monitors.iter().any(|m| m.primary);
-    let index = monitors.iter().map(|m| m.index).min().unwrap_or(0);
-
-    MonitorArea {
-        index,
-        primary,
-        rect: RECT {
-            left,
-            top,
-            right,
-            bottom,
-        },
-    }
 }
 
 fn ensure_desktop_host() -> Option<HWND> {
     unsafe {
         let progman = FindWindowW(w!("Progman"), None).ok()?;
-        warn!("[WALLPAPER][HOSTSEL] Progman={:?}", progman);
 
         let mut spawn_result = 0usize;
         let _ = SendMessageTimeoutW(
-            progman,
-            0x052C,
-            WPARAM(0),
-            LPARAM(0),
-            SMTO_NORMAL,
-            1000,
-            Some(&mut spawn_result),
+            progman, 0x052C, WPARAM(0), LPARAM(0),
+            SMTO_NORMAL, 1000, Some(&mut spawn_result),
         );
 
         let mut defview_host: Option<HWND> = None;
@@ -1852,87 +1534,83 @@ fn ensure_desktop_host() -> Option<HWND> {
         );
 
         if let Some(host) = defview_host {
-            warn!("[WALLPAPER][HOSTSEL] DefView host={:?}", host);
-
             if let Some(workerw) = FindWindowExW(None, Some(host), w!("WorkerW"), None).ok() {
-                warn!("[WALLPAPER][HOSTSEL] WorkerW sibling selected={:?}", workerw);
                 return Some(workerw);
             }
-
             if let Some(workerw) = FindWindowExW(Some(progman), None, w!("WorkerW"), None).ok() {
-                warn!("[WALLPAPER][HOSTSEL] WorkerW under Progman selected={:?}", workerw);
                 return Some(workerw);
             }
-
-            warn!("[WALLPAPER][HOSTSEL] No WorkerW found; using DefView host as fallback");
             return Some(host);
         }
 
         if let Some(workerw) = FindWindowExW(Some(progman), None, w!("WorkerW"), None).ok() {
-            warn!("[WALLPAPER][HOSTSEL] Fallback WorkerW selected={:?}", workerw);
             return Some(workerw);
         }
 
-        warn!("[WALLPAPER][HOSTSEL] Final fallback to Progman");
         Some(progman)
     }
 }
 
-fn global_window_states(appdata: &Value) -> Option<MonitorWindowStates> {
-    let app_map = appdata.as_object()?;
-    let mut states = MonitorWindowStates::default();
-    let mut found_window_state = false;
+// ── Monitor enumeration ────────────────────────────────────────────────────
 
-    for monitor_entry in app_map.values() {
-        let windows = monitor_entry
-            .get("windows")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
+fn enumerate_monitors() -> Vec<MonitorArea> {
+    unsafe extern "system" fn enum_monitor_proc(
+        monitor: HMONITOR, _hdc: HDC, _rect: *mut RECT, lparam: LPARAM,
+    ) -> BOOL {
+        let vec = &mut *(lparam.0 as *mut Vec<MonitorArea>);
 
-        for window in windows {
-            let (focused, maximized, fullscreen) = window_flags(&window);
-            if focused {
-                states.focused = true;
-                found_window_state = true;
-            }
-            if maximized {
-                states.maximized = true;
-                found_window_state = true;
-            }
-            if fullscreen {
-                states.fullscreen = true;
-                found_window_state = true;
-            }
+        let mut info: MONITORINFOEXW = mem::zeroed();
+        info.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+
+        if GetMonitorInfoW(monitor, &mut info as *mut MONITORINFOEXW as *mut _).as_bool() {
+            vec.push(MonitorArea {
+                index: vec.len(),
+                primary: info.monitorInfo.dwFlags != 0,
+                rect: info.monitorInfo.rcMonitor,
+            });
         }
+        BOOL(1)
     }
 
-    if found_window_state {
-        Some(states)
-    } else {
-        None
-    }
-}
-
-fn is_shell_foreground_active() -> bool {
+    let mut monitors = Vec::<MonitorArea>::new();
     unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.0.is_null() {
-            return true;
+        let _ = EnumDisplayMonitors(
+            None, None, Some(enum_monitor_proc),
+            LPARAM((&mut monitors as *mut Vec<MonitorArea>) as isize),
+        );
+    }
+
+    // Sort: top-to-bottom rows, then left-to-right within each row.
+    if monitors.len() > 1 {
+        let min_height = monitors.iter()
+            .map(|m| (m.rect.bottom - m.rect.top).max(1))
+            .min().unwrap_or(1);
+        let row_tolerance = (min_height / 4).max(80);
+
+        monitors.sort_by(|a, b| b.rect.top.cmp(&a.rect.top));
+
+        let mut rows: Vec<(i32, Vec<MonitorArea>)> = Vec::new();
+        for monitor in monitors.into_iter() {
+            if let Some((_, row)) = rows.iter_mut()
+                .find(|(anchor_y, _)| (monitor.rect.top - *anchor_y).abs() <= row_tolerance)
+            {
+                row.push(monitor);
+            } else {
+                rows.push((monitor.rect.top, vec![monitor]));
+            }
         }
-        is_shell_foreground_window(hwnd)
-    }
-}
 
-fn add_reload_nonce(url: &str) -> String {
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-
-    if url.contains('?') {
-        format!("{}&__sentinel_reload={}", url, nonce)
-    } else {
-        format!("{}?__sentinel_reload={}", url, nonce)
+        rows.sort_by(|(ay, _), (by, _)| by.cmp(ay));
+        let mut flattened = Vec::<MonitorArea>::new();
+        for (_, mut row) in rows {
+            row.sort_by(|a, b| a.rect.left.cmp(&b.rect.left));
+            flattened.extend(row);
+        }
+        monitors = flattened;
     }
+
+    for (index, monitor) in monitors.iter_mut().enumerate() {
+        monitor.index = index;
+    }
+    monitors
 }
