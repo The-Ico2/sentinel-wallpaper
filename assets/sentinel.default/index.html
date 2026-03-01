@@ -1,2722 +1,754 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Sentinel Default</title>
-<style>
-:root{
-  --au:0;
-  --ui-scale: 1;
-  --ui-scale-multiplier: 1;
-  --bg-color: #0a0406;
-  --text-color: #ffe4d8;
-  --accent: #C83228;
-  --ember: #FFAA3C;
-  --scene-accent: #C83228;
-  --scene-ember: #FFAA3C;
-  --accent-r: 200;
-  --accent-g: 50;
-  --accent-b: 40;
-  --ember-r: 255;
-  --ember-g: 170;
-  --ember-b: 60;
-  --font-family: 'Segoe UI', Inter, system-ui, sans-serif;
-  --hud-opacity: 0.3;
-  --font-size: 12;
-  --left-col-width: 300;
-  --right-col-width: 300;
-  --hud-padding: 10;
-  --panel-gap: 6;
-  --panel-radius: 10;
-  --panel-padding-y: 7;
-  --panel-padding-x: 10;
-  --top-blur: 8;
-  --panel-blur: 2;
-  --panel-border-opacity: 0.1;
-  --panel-bg-opacity: 0.06;
-  --viz-min-height: 100;
-  --lattice-spacing: 80;
+  <!-- HTML Meta Tags -->
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sentinel Default</title>
 
-  /* ── Granular color overrides ── */
-  --heading-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.75);
-  --label-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.8);
-  --value-color: var(--text-color);
-  --clock-color: var(--text-color);
-  --hint-color: rgba(var(--accent-r), calc(var(--accent-g) * 3.2), calc(var(--accent-b) * 3.75), 0.7);
-  --status-pill-color: var(--text-color);
-  --bar-fill-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.8);
-  --bar-track-color: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.1);
-  --cap-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.7);
-  --cap-active-color: var(--text-color);
-  --cap-dot-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.88);
-  --chip-border-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.4);
-  --chip-text-color: var(--text-color);
-  --media-title-color: var(--text-color);
-  --media-artist-color: var(--text-color);
-  --media-album-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.55);
-  --media-status-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.6);
-  --media-progress-start: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.6);
-  --media-progress-end: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.75);
-  --media-chip-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.6);
-  --media-active-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.9);
-  --media-time-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.5);
-  --media-idle-color: rgba(var(--accent-r), calc(var(--accent-g) * 3), calc(var(--accent-b) * 3.5), 0.4);
-
-  /* ── Per-component bar colors ── */
-  --cpu-bar-color: rgba(220, 70, 50, 0.8);
-  --gpu-bar-color: rgba(220, 110, 70, 0.8);
-  --vram-bar-color: rgba(180, 120, 255, 0.7);
-  --ram-bar-color: rgba(200, 80, 60, 0.8);
-  --storage-bar-color: rgba(240, 150, 70, 0.78);
-  --storage-pool-bar-color: rgba(240, 170, 90, 0.7);
-  --audio-bar-color: rgba(255, 140, 60, 0.8);
-  --battery-bar-color: rgba(100, 200, 120, 0.8);
-  --wifi-bar-color: rgba(80, 180, 255, 0.75);
-}
-
-* {
-  margin:0;
-  padding:0;
-  box-sizing:border-box;
-}
-html,body{
-  width:100%;
-  height:100%;
-  overflow:hidden;
-  background: var(--bg-color);
-  color: var(--text-color);
-  font-family: var(--font-family);
-}
-canvas{
-  position:fixed;
-  inset:0;
-  z-index:0;
-}
-
-/* ─── HUD ─── */
-.hud {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: calc(100% / var(--ui-scale));
-  height: calc(100% / var(--ui-scale));
-  z-index: 1;
-  pointer-events: none;
-  transform-origin: top left;
-  transform: scale(var(--ui-scale));
-  padding: calc(var(--hud-padding) * 1px);
-  display: grid;
-  grid-template-columns: calc(var(--left-col-width) * 1px) 1fr calc(var(--right-col-width) * 1px);
-  grid-template-rows: auto 1fr auto;
-  gap: calc(var(--panel-gap) * 1px);
-}
-
-/* title bar */
-.top {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: rgba(var(--bg-r), var(--bg-g), var(--bg-b), var(--hud-opacity));
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
-  border-radius: calc(var(--panel-radius) * 1px);
-  padding: 6px 16px;
-  backdrop-filter: blur(calc(var(--top-blur) * 1px));
-}
-
-.top .time {
-  font-size: calc(var(--font-size) * 1px);
-  color: var(--clock-color);
-  opacity: 0.85;
-  letter-spacing: 0.08em;
-  font-variant-numeric: tabular-nums;
-}
-
-/* panels */
-.pnl {
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-bg-opacity));
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
-  border-radius: calc(var(--panel-radius) * 1px);
-  padding: calc(var(--panel-padding-y) * 1px) calc(var(--panel-padding-x) * 1px);
-  backdrop-filter: blur(calc(var(--panel-blur) * 1px));
-  overflow: visible;
-  flex-shrink: 1;
-  min-height: 0;
-}
-
-.pnl h2 {
-  font-size: 10.5px;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--heading-color);
-  margin-bottom: 3px;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  font-size: calc(var(--font-size) * 1px);
-  padding: 1px 0;
-}
-
-.lbl {
-  color: var(--label-color);
-}
-
-.val {
-  color: var(--value-color);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-/* progress bars */
-.bar-wrap {
-  height: 4px;
-  background: var(--bar-track-color);
-  border-radius: 3px;
-  margin: 2px 0 3px;
-  overflow: hidden;
-}
-
-.bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.4s ease;
-}
-
-/* left column */
-.left {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--panel-gap) * 1px - 1px);
-  overflow-y: auto;
-  scrollbar-width: none;
-  min-height: 0;
-}
-
-.left::-webkit-scrollbar {
-  display: none;
-}
-
-/* right column */
-.right {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--panel-gap) * 1px - 1px);
-  overflow-y: auto;
-  scrollbar-width: none;
-  min-height: 0;
-}
-
-.right::-webkit-scrollbar {
-  display: none;
-}
-
-/* capability signals */
-.caps {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 5px;
-}
-
-.cap {
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2);
-  border-radius: 7px;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 4px 6px;
-  color: var(--cap-color);
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.05);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.25);
-  transition: all 0.2s;
-}
-
-.cap.on {
-  color: var(--cap-active-color);
-  border-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.4);
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.12);
-}
-
-.cap.on .dot {
-  background: var(--cap-dot-color);
-  box-shadow: 0 0 8px rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.6);
-}
-
-/* key chips */
-.keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  height: 40px;
-  overflow: hidden;
-  align-content: flex-start;
-}
-
-.chip {
-  border: 1px solid var(--chip-border-color);
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.15);
-  color: var(--chip-text-color);
-  border-radius: 6px;
-  font-size: 10px;
-  padding: 3px 6px;
-  animation: fadeout 0.9s ease forwards;
-}
-
-@keyframes fadeout {
-  0% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.95);
-  }
-}
-
-/* audio visualizer (combined, in right column) */
-.vizPanel {
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
-  border-radius: calc(var(--panel-radius) * 1px);
-  padding: 0;
-  backdrop-filter: blur(calc(var(--top-blur) * 1px));
-  overflow: hidden;
-  position: relative;
-  min-height: calc(var(--viz-min-height) * 1px);
-  flex-shrink: 1;
-}
-
-.vizPanel canvas {
-  position: absolute;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  border-radius: calc(var(--panel-radius) * 1px);
-  display: block;
-}
-
-#levelCanvas {
-  z-index: 1;
-}
-
-/* status bar */
-.status {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.pill {
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-border-opacity));
-  border-radius: 999px;
-  padding: 4px 12px;
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), var(--panel-bg-opacity));
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--status-pill-color);
-  opacity: 0.85;
-}
-
-.hint {
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  color: var(--hint-color);
-  text-transform: uppercase;
-}
-
-/* ─── Media Player Panel ─── */
-#mediaPanel {
-  padding: 0;
-  overflow: visible;
-  flex-shrink: 0;
-}
-#mediaPanel h2 {
-  display: none; /* header replaced by inline layout */
-}
-
-.media-player {
-  position: relative;
-}
-
-/* Hero: album art + track info side by side */
-.media-hero {
-  display: flex;
-  gap: 10px;
-  padding: calc(var(--panel-padding-y) * 1px) calc(var(--panel-padding-x) * 1px);
-  padding-bottom: 6px;
-  align-items: flex-start;
-}
-
-.media-art {
-  width: 52px;
-  height: 52px;
-  min-width: 52px;
-  border-radius: 6px;
-  object-fit: cover;
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.2);
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.08);
-}
-
-.media-art-placeholder {
-  width: 52px;
-  height: 52px;
-  min-width: 52px;
-  border-radius: 6px;
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.15);
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.media-art-placeholder svg {
-  width: 22px;
-  height: 22px;
-  opacity: 0.25;
-}
-
-.media-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.media-title {
-  font-size: calc(var(--font-size) * 1px + 1px);
-  color: var(--media-title-color);
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.3;
-}
-
-.media-artist {
-  font-size: calc(var(--font-size) * 1px);
-  color: var(--media-artist-color);
-  opacity: 0.8;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.4;
-  min-height: 1em;
-}
-
-.media-album {
-  font-size: calc(var(--font-size) * 1px - 2px);
-  color: var(--media-album-color);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.3;
-}
-
-/* Status badge */
-.media-status {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 2px;
-}
-
-.media-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.35);
-  flex-shrink: 0;
-}
-
-.media-status-dot.playing {
-  background: var(--media-active-color);
-  box-shadow: 0 0 6px rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.5);
-  animation: media-pulse 1.8s ease-in-out infinite;
-}
-
-@keyframes media-pulse {
-  0%,100% { opacity: 1; }
-  50%     { opacity: 0.4; }
-}
-
-.media-status-label {
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--media-status-color);
-}
-
-/* Progress track */
-.media-progress {
-  padding: 0 calc(var(--panel-padding-x) * 1px);
-}
-
-.media-progress-bar {
-  height: 3px;
-  background: var(--bar-track-color);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.media-progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--media-progress-start), var(--media-progress-end));
-  transition: width 0.15s linear;
-}
-
-.media-time {
-  display: flex;
-  justify-content: space-between;
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-  color: var(--media-time-color);
-  margin-top: 2px;
-  letter-spacing: 0.03em;
-}
-
-/* Meta chips row */
-.media-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 5px calc(var(--panel-padding-x) * 1px) calc(var(--panel-padding-y) * 1px);
-}
-
-.media-chip {
-  border: 1px solid rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.15);
-  background: rgba(var(--accent-r), var(--accent-g), var(--accent-b), 0.06);
-  border-radius: 4px;
-  font-size: 9px;
-  padding: 2px 6px;
-  letter-spacing: 0.04em;
-  color: var(--media-chip-color);
-}
-
-.media-chip.active {
-  border-color: rgba(var(--ember-r), var(--ember-g), var(--ember-b), 0.3);
-  color: var(--media-active-color);
-}
-
-/* Idle / nothing playing state */
-.media-idle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 16px calc(var(--panel-padding-x) * 1px);
-  color: var(--media-idle-color);
-  font-size: calc(var(--font-size) * 1px - 1px);
-  letter-spacing: 0.06em;
-}
-
-.media-idle svg {
-  width: 16px;
-  height: 16px;
-  opacity: 0.35;
-}
-</style>
+  <!-- Styles and Scripts -->
+  <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-<canvas id="fx"></canvas>
+  <canvas id="fx">
+  </canvas>
 
-<div class="hud">
-  <!-- Top bar -->
-  <div class="top">
-    <span class="time" id="clock">--:--:--</span>
+  <div class="hud">
+    <!-- Top bar -->
+    <div class="top">
+      <span class="time" id="clock">
+        <data-bind binding="time.hour" />:<data-bind binding="time.minute" />:<data-bind binding="time.second" />
+      </span>
+      <span class="top-date">
+        <data-bind binding="time.weekday" />, <data-bind binding="time.date_formatted" />
+      </span>
+      <span class="top-uptime">
+        <data-bind binding="time.uptime_seconds" format="{uptime}" />
+      </span>
+    </div>
+
+    <!-- Left: Hardware & System -->
+    <div class="left">
+      <!-- CPU -->
+      <div class="pnl" id="cpuPanel">
+        <h2>CPU</h2>
+        <div id="cpuInfo">
+          <div class="row">
+            <span class="lbl">Model</span>
+            <data-bind class="val" binding="cpu.brand" />
+          </div>
+          <div class="row">
+            <span class="lbl">Cores</span>
+            <data-bind class="val" binding="cpu.physical_cores" />
+          </div>
+          <div class="row">
+            <span class="lbl">Threads</span>
+            <data-bind class="val" binding="cpu.logical_cores" />
+          </div>
+          <div class="row">
+            <span class="lbl">Usage</span>
+            <data-bind class="val" binding="cpu.usage_percent" format="{.1}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="cpu.usage_percent" max="100" style="color: var(--cpu-bar-color);" />
+          <div class="row">
+            <span class="lbl">Frequency</span>
+            <data-bind class="val" binding="cpu.frequency_mhz" format="{} MHz" />
+          </div>
+          <div class="row">
+            <span class="lbl">Temperature</span>
+            <data-bind class="val" binding="cpu.temperature.average_c" format="{.1}°C" />
+          </div>
+          <div class="row">
+            <span class="lbl">Processes</span>
+            <data-bind class="val" binding="cpu.process_count" />
+          </div>
+          <div class="row">
+            <span class="lbl">Handles</span>
+            <data-bind class="val" binding="cpu.handle_count" />
+          </div>
+          <div class="row">
+            <span class="lbl">Virtualization</span>
+            <data-bind class="val" binding="cpu.virtualization" />
+          </div>
+          <div class="row">
+            <span class="lbl">L1 Cache</span>
+            <data-bind class="val" binding="cpu.l1_cache_kb" format="{} KB" />
+          </div>
+          <div class="row">
+            <span class="lbl">L2 Cache</span>
+            <data-bind class="val" binding="cpu.l2_cache_kb" format="{} KB" />
+          </div>
+          <div class="row">
+            <span class="lbl">L3 Cache</span>
+            <data-bind class="val" binding="cpu.l3_cache_kb" format="{} KB" />
+          </div>
+        </div>
+      </div>
+
+      <!-- GPU -->
+      <div class="pnl" id="gpuPanel">
+        <h2>GPU</h2>
+        <div id="gpuInfo">
+          <div class="row">
+            <span class="lbl">Name</span>
+            <data-bind class="val" binding="gpu.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Usage</span>
+            <data-bind class="val" binding="gpu.usage_percent" format="{.1}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="gpu.usage_percent" max="100" style="color: var(--gpu-bar-color);" />
+          <div class="row">
+            <span class="lbl">VRAM Used</span>
+            <data-bind class="val" binding="gpu.vram_used_mb" format="{} MB" />
+          </div>
+          <div class="row">
+            <span class="lbl">VRAM Total</span>
+            <data-bind class="val" binding="gpu.vram_total_mb" format="{} MB" />
+          </div>
+          <div class="row">
+            <span class="lbl">VRAM Usage</span>
+            <data-bind class="val" binding="gpu.memory_usage_percent" format="{.1}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="gpu.memory_usage_percent" max="100" style="color: var(--vram-bar-color);" />
+          <div class="row">
+            <span class="lbl">Driver</span>
+            <data-bind class="val" binding="gpu.driver_version" />
+          </div>
+          <div class="row">
+            <span class="lbl">Driver Date</span>
+            <data-bind class="val" binding="gpu.driver_date" />
+          </div>
+          <div class="row">
+            <span class="lbl">Temperature</span>
+            <data-bind class="val" binding="gpu.temperature_c" format="{.1}°C" />
+          </div>
+          <div class="row">
+            <span class="lbl">GPU Clock</span>
+            <data-bind class="val" binding="gpu.clock_graphics_mhz" format="{} MHz" />
+          </div>
+          <div class="row">
+            <span class="lbl">Mem Clock</span>
+            <data-bind class="val" binding="gpu.clock_memory_mhz" format="{} MHz" />
+          </div>
+          <div class="row">
+            <span class="lbl">Power</span>
+            <data-bind class="val" binding="gpu.power_draw_w" format="{.1} W" />
+          </div>
+          <div class="row">
+            <span class="lbl">Fan Speed</span>
+            <data-bind class="val" binding="gpu.fan_speed_percent" format="{.0}%" />
+          </div>
+          <div class="row">
+            <span class="lbl">Encoder</span>
+            <data-bind class="val" binding="gpu.encoder_usage_percent" format="{.1}%" />
+          </div>
+          <div class="row">
+            <span class="lbl">Decoder</span>
+            <data-bind class="val" binding="gpu.decoder_usage_percent" format="{.1}%" />
+          </div>
+          <div class="row">
+            <span class="lbl">Manufacturer</span>
+            <data-bind class="val" binding="gpu.manufacturer" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Memory -->
+      <div class="pnl" id="ramPanel">
+        <h2>Memory</h2>
+        <div id="ramInfo">
+          <div class="row">
+            <span class="lbl">Total</span>
+            <data-bind class="val" binding="ram.total_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">In Use</span>
+            <data-bind class="val" binding="ram.used_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Available</span>
+            <data-bind class="val" binding="ram.available_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Usage</span>
+            <data-bind class="val" binding="ram.usage_percent" format="{.1}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="ram.usage_percent" max="100" style="color: var(--ram-bar-color);" />
+          <div class="row">
+            <span class="lbl">Speed</span>
+            <data-bind class="val" binding="ram.speed_mhz" format="{} MHz" />
+          </div>
+          <div class="row">
+            <span class="lbl">Type</span>
+            <data-bind class="val" binding="ram.memory_type" />
+          </div>
+          <div class="row">
+            <span class="lbl">Form Factor</span>
+            <data-bind class="val" binding="ram.form_factor" />
+          </div>
+          <div class="row">
+            <span class="lbl">Slots Used</span>
+            <data-bind class="val" binding="ram.slots_used" />
+          </div>
+          <div class="row">
+            <span class="lbl">Swap Used</span>
+            <data-bind class="val" binding="ram.swap_used_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Swap Total</span>
+            <data-bind class="val" binding="ram.swap_total_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Swap Usage</span>
+            <data-bind class="val" binding="ram.swap_usage_percent" format="{.1}%" />
+          </div>
+          <div class="row">
+            <span class="lbl">Cached</span>
+            <data-bind class="val" binding="ram.cached_bytes" format="{bytes}" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Storage -->
+      <div class="pnl" id="storagePanel">
+        <h2>Storage</h2>
+        <div id="storageInfo">
+          <div class="row">
+            <span class="lbl">Total</span>
+            <data-bind class="val" binding="storage.total_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Used</span>
+            <data-bind class="val" binding="storage.used_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Available</span>
+            <data-bind class="val" binding="storage.available_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Usage</span>
+            <data-bind class="val" binding="storage.usage_percent" format="{.1}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="storage.usage_percent" max="100" style="color: var(--storage-bar-color);" />
+          <div class="row">
+            <span class="lbl">Disks</span>
+            <data-bind class="val" binding="storage.disk_count" />
+          </div>
+          <div class="row">
+            <span class="lbl">Disk 0</span>
+            <data-bind class="val" binding="storage.disks.0.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">  Type</span>
+            <data-bind class="val" binding="storage.disks.0.kind" />
+          </div>
+          <div class="row">
+            <span class="lbl">  Used</span>
+            <data-bind class="val" binding="storage.disks.0.used_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">  Total</span>
+            <data-bind class="val" binding="storage.disks.0.total_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Disk 1</span>
+            <data-bind class="val" binding="storage.disks.1.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">  Type</span>
+            <data-bind class="val" binding="storage.disks.1.kind" />
+          </div>
+          <div class="row">
+            <span class="lbl">  Used</span>
+            <data-bind class="val" binding="storage.disks.1.used_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">  Total</span>
+            <data-bind class="val" binding="storage.disks.1.total_bytes" format="{bytes}" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Network -->
+      <div class="pnl" id="networkPanel">
+        <h2>Network</h2>
+        <div id="networkInfo">
+          <div class="row">
+            <span class="lbl">Download</span>
+            <data-bind class="val" binding="network.received_bytes_per_second" format="{speed}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Upload</span>
+            <data-bind class="val" binding="network.transmitted_bytes_per_second" format="{speed}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Total ↓</span>
+            <data-bind class="val" binding="network.total_received_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Total ↑</span>
+            <data-bind class="val" binding="network.total_transmitted_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Packets ↓</span>
+            <data-bind class="val" binding="network.total_packets_received" />
+          </div>
+          <div class="row">
+            <span class="lbl">Packets ↑</span>
+            <data-bind class="val" binding="network.total_packets_transmitted" />
+          </div>
+          <div class="row">
+            <span class="lbl">Interfaces</span>
+            <data-bind class="val" binding="network.interface_count" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Processes -->
+      <div class="pnl" id="processPanel">
+        <h2>Processes</h2>
+        <div id="processInfo">
+          <div class="row">
+            <span class="lbl">Total</span>
+            <data-bind class="val" binding="processes.total_count" />
+          </div>
+          <div class="row">
+            <span class="lbl">CPU Total</span>
+            <data-bind class="val" binding="processes.total_cpu_usage" format="{.1}%" />
+          </div>
+          <div class="row">
+            <span class="lbl">Memory Total</span>
+            <data-bind class="val" binding="processes.total_memory_bytes" format="{bytes}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Running</span>
+            <data-bind class="val" binding="processes.status_counts.running" />
+          </div>
+          <div class="row">
+            <span class="lbl">Sleeping</span>
+            <data-bind class="val" binding="processes.status_counts.sleeping" />
+          </div>
+          <div class="row">
+            <span class="lbl">Top CPU 1</span>
+            <data-bind class="val" binding="processes.top_cpu.0.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Top CPU 2</span>
+            <data-bind class="val" binding="processes.top_cpu.1.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Top CPU 3</span>
+            <data-bind class="val" binding="processes.top_cpu.2.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Top Mem 1</span>
+            <data-bind class="val" binding="processes.top_memory.0.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Top Mem 2</span>
+            <data-bind class="val" binding="processes.top_memory.1.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Top Mem 3</span>
+            <data-bind class="val" binding="processes.top_memory.2.name" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Center (empty, background shows through) -->
+    <div>
+    </div>
+
+    <!-- Right: Connectivity, Peripherals, Activity -->
+    <div class="right">
+      <!-- Audio -->
+      <div class="pnl" id="audioPanel">
+        <h2>Audio</h2>
+        <div id="audioStats">
+          <div class="row">
+            <span class="lbl">Output</span>
+            <data-bind class="val" binding="audio.output_device.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Volume</span>
+            <data-bind class="val" binding="audio.output_device.volume_percent" format="{.0}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="audio.output_device.volume_percent" max="100" style="color: var(--audio-bar-color);" />
+          <div class="row">
+            <span class="lbl">Muted</span>
+            <data-bind class="val" binding="audio.output_device.muted" />
+          </div>
+          <div class="row">
+            <span class="lbl">Audio Level</span>
+            <data-bind class="val" binding="audio.output_device.audio_level" format="{.2}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Peak</span>
+            <data-bind class="val" binding="audio.output_device.levels.peak" format="{.3}" />
+          </div>
+          <div class="row">
+            <span class="lbl">RMS</span>
+            <data-bind class="val" binding="audio.output_device.levels.rms" format="{.3}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Input</span>
+            <data-bind class="val" binding="audio.input_device.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Input Vol</span>
+            <data-bind class="val" binding="audio.input_device.volume_percent" format="{.0}%" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Wi-Fi -->
+      <div class="pnl" id="wifiPanel">
+        <h2>Wi-Fi</h2>
+        <div id="wifiInfo">
+          <div class="row">
+            <span class="lbl">Connected</span>
+            <data-bind class="val" binding="wifi.connected.is_connected" />
+          </div>
+          <div class="row">
+            <span class="lbl">SSID</span>
+            <data-bind class="val" binding="wifi.connected.ssid" />
+          </div>
+          <div class="row">
+            <span class="lbl">Signal</span>
+            <data-bind class="val" binding="wifi.connected.signal_percent" format="{}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="wifi.connected.signal_percent" max="100" style="color: var(--wifi-bar-color);" />
+          <div class="row">
+            <span class="lbl">Band</span>
+            <data-bind class="val" binding="wifi.connected.band" />
+          </div>
+          <div class="row">
+            <span class="lbl">Radio</span>
+            <data-bind class="val" binding="wifi.connected.radio_type" />
+          </div>
+          <div class="row">
+            <span class="lbl">Channel</span>
+            <data-bind class="val" binding="wifi.connected.channel" />
+          </div>
+          <div class="row">
+            <span class="lbl">Auth</span>
+            <data-bind class="val" binding="wifi.connected.authentication" />
+          </div>
+          <div class="row">
+            <span class="lbl">RX Rate</span>
+            <data-bind class="val" binding="wifi.connected.receive_rate_mbps" format="{.1} Mbps" />
+          </div>
+          <div class="row">
+            <span class="lbl">TX Rate</span>
+            <data-bind class="val" binding="wifi.connected.transmit_rate_mbps" format="{.1} Mbps" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Bluetooth -->
+      <div class="pnl" id="btPanel">
+        <h2>Bluetooth</h2>
+        <div id="btInfo">
+          <div class="row">
+            <span class="lbl">Adapter</span>
+            <data-bind class="val" binding="bluetooth.adapter.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Status</span>
+            <data-bind class="val" binding="bluetooth.adapter.status" />
+          </div>
+          <div class="row">
+            <span class="lbl">Present</span>
+            <data-bind class="val" binding="bluetooth.adapter.present" />
+          </div>
+          <div class="row">
+            <span class="lbl">Device 1</span>
+            <data-bind class="val" binding="bluetooth.devices.0.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Device 2</span>
+            <data-bind class="val" binding="bluetooth.devices.1.name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Device 3</span>
+            <data-bind class="val" binding="bluetooth.devices.2.name" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Media Session -->
+      <div class="pnl" id="mediaPanel">
+        <h2>Media</h2>
+        <div id="mediaInfo" class="media-player">
+          <div class="row">
+            <span class="lbl">Title</span>
+            <data-bind class="val" binding="media.title" />
+          </div>
+          <div class="row">
+            <span class="lbl">Artist</span>
+            <data-bind class="val" binding="media.artist" />
+          </div>
+          <div class="row">
+            <span class="lbl">Album</span>
+            <data-bind class="val" binding="media.album" />
+          </div>
+          <div class="row">
+            <span class="lbl">Status</span>
+            <data-bind class="val" binding="media.playback_status" />
+          </div>
+          <div class="row">
+            <span class="lbl">Playing</span>
+            <data-bind class="val" binding="media.playing" />
+          </div>
+          <div class="row">
+            <span class="lbl">Shuffle</span>
+            <data-bind class="val" binding="media.shuffle" />
+          </div>
+          <div class="row">
+            <span class="lbl">Repeat</span>
+            <data-bind class="val" binding="media.repeat_mode" />
+          </div>
+          <div class="row">
+            <span class="lbl">Source</span>
+            <data-bind class="val" binding="media.source_app_id" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Power -->
+      <div class="pnl" id="powerPanel">
+        <h2>Power</h2>
+        <div id="powerInfo">
+          <div class="row">
+            <span class="lbl">AC Status</span>
+            <data-bind class="val" binding="power.ac_status" />
+          </div>
+          <div class="row">
+            <span class="lbl">Battery</span>
+            <data-bind class="val" binding="power.battery.percent" format="{}%" />
+          </div>
+          <data-bar class="bar-wrap" binding="power.battery.percent" max="100" style="color: var(--battery-bar-color);" />
+          <div class="row">
+            <span class="lbl">Present</span>
+            <data-bind class="val" binding="power.battery.present" />
+          </div>
+          <div class="row">
+            <span class="lbl">Charging</span>
+            <data-bind class="val" binding="power.battery.charging" />
+          </div>
+          <div class="row">
+            <span class="lbl">Saver</span>
+            <data-bind class="val" binding="power.battery.saver_active" />
+          </div>
+          <div class="row">
+            <span class="lbl">Power Plan</span>
+            <data-bind class="val" binding="power.power_plan" />
+          </div>
+          <div class="row">
+            <span class="lbl">Chemistry</span>
+            <data-bind class="val" binding="power.battery.details.chemistry" />
+          </div>
+          <div class="row">
+            <span class="lbl">Health</span>
+            <data-bind class="val" binding="power.battery.details.health_percent" format="{.1}%" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Displays -->
+      <div class="pnl" id="displayPanel">
+        <h2>Displays</h2>
+        <div id="displayInfo">
+          <div class="row">
+            <span class="lbl">Monitor</span>
+            <data-bind class="val" binding="displays.0.metadata.monitor_name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Resolution</span>
+            <data-bind class="val" binding="displays.0.metadata.width" />
+          </div>
+          <div class="row">
+            <span class="lbl">Refresh</span>
+            <data-bind class="val" binding="displays.0.metadata.refresh_rate_hz" format="{} Hz" />
+          </div>
+          <div class="row">
+            <span class="lbl">DPI</span>
+            <data-bind class="val" binding="displays.0.metadata.dpi" />
+          </div>
+          <div class="row">
+            <span class="lbl">Scale</span>
+            <data-bind class="val" binding="displays.0.metadata.scale" format="{.0}%" />
+          </div>
+          <div class="row">
+            <span class="lbl">Color Depth</span>
+            <data-bind class="val" binding="displays.0.metadata.color_depth_bits" format="{}-bit" />
+          </div>
+          <div class="row">
+            <span class="lbl">Connection</span>
+            <data-bind class="val" binding="displays.0.metadata.connection_type" />
+          </div>
+          <div class="row">
+            <span class="lbl">HDR</span>
+            <data-bind class="val" binding="displays.0.metadata.hdr_supported" />
+          </div>
+          <div class="row">
+            <span class="lbl">Manufacturer</span>
+            <data-bind class="val" binding="displays.0.metadata.manufacturer" />
+          </div>
+          <div class="row">
+            <span class="lbl">Year</span>
+            <data-bind class="val" binding="displays.0.metadata.year_of_manufacture" />
+          </div>
+        </div>
+      </div>
+
+      <!-- System -->
+      <div class="pnl" id="systemPanel">
+        <h2>System</h2>
+        <div id="systemInfo">
+          <div class="row">
+            <span class="lbl">Hostname</span>
+            <data-bind class="val" binding="system.hostname" />
+          </div>
+          <div class="row">
+            <span class="lbl">OS</span>
+            <data-bind class="val" binding="system.os.long_name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Version</span>
+            <data-bind class="val" binding="system.os.version" />
+          </div>
+          <div class="row">
+            <span class="lbl">Kernel</span>
+            <data-bind class="val" binding="system.os.kernel_version" />
+          </div>
+          <div class="row">
+            <span class="lbl">Arch</span>
+            <data-bind class="val" binding="system.os.cpu_arch" />
+          </div>
+          <div class="row">
+            <span class="lbl">User</span>
+            <data-bind class="val" binding="system.username" />
+          </div>
+          <div class="row">
+            <span class="lbl">Domain</span>
+            <data-bind class="val" binding="system.user_domain" />
+          </div>
+          <div class="row">
+            <span class="lbl">Uptime</span>
+            <data-bind class="val" binding="system.uptime_seconds" format="{uptime}" />
+          </div>
+          <div class="row">
+            <span class="lbl">Language</span>
+            <data-bind class="val" binding="system.locale.language.display_name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Timezone</span>
+            <data-bind class="val" binding="system.locale.timezone.display_name" />
+          </div>
+          <div class="row">
+            <span class="lbl">Theme</span>
+            <data-bind class="val" binding="system.theme.system_theme" />
+          </div>
+          <div class="row">
+            <span class="lbl">Board</span>
+            <data-bind class="val" binding="system.motherboard.product" />
+          </div>
+          <div class="row">
+            <span class="lbl">BIOS</span>
+            <data-bind class="val" binding="system.bios.name" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Keyboard -->
+      <div class="pnl" id="kbPanel">
+        <h2>Keyboard</h2>
+        <div id="kbInfo">
+          <div class="row">
+            <span class="lbl">Layout</span>
+            <data-bind class="val" binding="keyboard.layout_id" />
+          </div>
+          <div class="row">
+            <span class="lbl">Caps Lock</span>
+            <data-bind class="val" binding="keyboard.toggle_states.caps_lock" />
+          </div>
+          <div class="row">
+            <span class="lbl">Num Lock</span>
+            <data-bind class="val" binding="keyboard.toggle_states.num_lock" />
+          </div>
+          <div class="row">
+            <span class="lbl">Scroll Lock</span>
+            <data-bind class="val" binding="keyboard.toggle_states.scroll_lock" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Mouse -->
+      <div class="pnl" id="mousePanel">
+        <h2>Mouse</h2>
+        <div id="mouseInfo">
+          <div class="row">
+            <span class="lbl">Position</span>
+            <data-bind class="val" binding="mouse.cursor.x" />
+          </div>
+          <div class="row">
+            <span class="lbl">Left Clicks</span>
+            <data-bind class="val" binding="mouse.buttons.left_clicks" />
+          </div>
+          <div class="row">
+            <span class="lbl">Right Clicks</span>
+            <data-bind class="val" binding="mouse.buttons.right_clicks" />
+          </div>
+          <div class="row">
+            <span class="lbl">Speed</span>
+            <data-bind class="val" binding="mouse.speed" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Idle -->
+      <div class="pnl" id="idlePanel">
+        <h2>Idle</h2>
+        <div id="idleInfo">
+          <div class="row">
+            <span class="lbl">State</span>
+            <data-bind class="val" binding="idle.idle_state" />
+          </div>
+          <div class="row">
+            <span class="lbl">Idle Time</span>
+            <data-bind class="val" binding="idle.idle_minutes" format="{} min" />
+          </div>
+          <div class="row">
+            <span class="lbl">Locked</span>
+            <data-bind class="val" binding="idle.screen_locked" />
+          </div>
+          <div class="row">
+            <span class="lbl">Screensaver</span>
+            <data-bind class="val" binding="idle.screensaver_active" />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status">
+      <span class="hint" id="fpsHint">CanvasX</span>
+      <span class="pill" id="statusPill">running</span>
+    </div>
   </div>
 
-  <!-- Left: System Info -->
-  <div class="left">
-    <div class="pnl" id="cpuPanel">
-      <h2>CPU</h2>
-      <div id="cpuInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <div class="pnl" id="gpuPanel">
-      <h2>GPU</h2>
-      <div id="gpuInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <div class="pnl" id="ramPanel">
-      <h2>Memory</h2>
-      <div id="ramInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <div class="pnl" id="storagePanel">
-      <h2>Storage</h2>
-      <div id="storageInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <div class="pnl" id="networkPanel">
-      <h2>Network</h2>
-      <div id="networkInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <div class="pnl" id="powerPanel">
-      <h2>Power</h2>
-      <div id="powerInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <div class="pnl" id="systemPanel">
-      <h2>System</h2>
-      <div id="systemInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-  </div>
-
-  <!-- Center (empty, background shows through) -->
-  <div></div>
-
-  <!-- Right: Interaction + Audio + Connectivity -->
-  <div class="right">
-    <div class="pnl" id="eventPanel">
-      <h2>Event Signals</h2>
-      <div class="caps" id="caps"></div>
-    </div>
-    <div class="pnl" id="interPanel">
-      <h2>Interaction Stats</h2>
-      <div id="interStats"></div>
-    </div>
-    <div class="pnl" id="keysPanel">
-      <h2>Recent Keys</h2>
-      <div class="keys" id="keys"></div>
-    </div>
-    <div class="pnl" id="audioPanel">
-      <h2>Audio Device</h2>
-      <div id="audioStats"></div>
-    </div>
-    <div class="pnl" id="wifiPanel">
-      <h2>Wi-Fi</h2>
-      <div id="wifiInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <div class="pnl" id="btPanel">
-      <h2>Bluetooth</h2>
-      <div id="btInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div>
-    <!-- <div class="pnl" id="idlePanel">
-      <h2>Idle</h2>
-      <div id="idleInfo"><div class="row"><span class="lbl">Waiting for data…</span></div></div>
-    </div> -->
-    <div class="pnl" id="mediaPanel">
-      <h2>Media Session</h2>
-      <div id="mediaInfo" class="media-player"></div>
-    </div>
-    <div class="vizPanel" id="vizPanel">
-      <canvas id="freqCanvas"></canvas>
-      <canvas id="levelCanvas"></canvas>
-    </div>
-  </div>
-
-  <!-- Status bar -->
-  <div class="status">
-    <span class="hint" id="fpsHint">FPS: --</span>
-    <span class="pill" id="statusPill">running</span>
-  </div>
-</div>
-
-<!-- Sentinel SDK -->
-<script src="../sentinel.js"></script>
-
-<script>
-/* ───────── Canvas setup ───────── */
-const C  = document.getElementById('fx');
-const X  = C.getContext('2d');
-const FC = document.getElementById('freqCanvas');
-const FX = FC.getContext('2d');
-const LC = document.getElementById('levelCanvas');
-const LX = LC.getContext('2d');
-
-let W = 1, H = 1, frame = 0;
-let audio = 0, audioTarget = 0;
-let mx = .5, my = .5;
-let lastFrameTime = performance.now(), fps = 60;
-
-/* ───────── Interaction counters ───────── */
-let moveCount = 0, clickCount = 0, keyDownCount = 0, keyUpCount = 0;
-let lastKey = '—', lastEvent = '—';
-const activeKeys = new Set();
-let lastMouseSnapshot = null;
-let lastKeyboardSnapshot = null;
-
-/* ───────── Capability signals ───────── */
-const capDefs = [
-  { id:'move',     label:'Move' },
-  { id:'click',    label:'Click' },
-  { id:'keydown',  label:'Key ↓' },
-  { id:'keyup',    label:'Key ↑' },
-  { id:'audio',    label:'Audio' },
-  { id:'pause',    label:'Pause' },
-  { id:'registry', label:'Registry' },
-];
-const capLife = {};
-capDefs.forEach(c => capLife[c.id] = 0);
-function ping(id) { capLife[id] = 1; }
-
-/* ───────── Visual FX state ───────── */
-const stars = [];
-const trails = [];
-const ripples = [];
-const keyBursts = [];
-
-/* ───────── Sentinel background state ───────── */
-const wardenNodes = [];     // neural mesh nodes
-const embers = [];          // floating ember particles
-const tendrils = [];        // bezier curve guardian tendrils
-let pulseWaves = [];        // heartbeat pulse waves
-let breathPhase = 0;        // breathing animation phase
-const WARDEN_NODE_COUNT = 45;
-const EMBER_COUNT = 70;
-const TENDRIL_COUNT = 6;
-const WARDEN_CONNECT_DIST = 180;
-
-/* ───────── Performance: cached sprites & patterns ───────── */
-let _scanlinePat = null;       // CanvasPattern for CRT scanlines
-let _vigGrad = null;           // Cached vignette CanvasGradient
-let _vigW = 0, _vigH = 0;     // Size key – recreate when canvas resizes
-let _emberSprite = null;       // Offscreen glow sprite for embers
-let _fgSprite = null;          // Offscreen glow sprite for foreground particles
-let _trailSprite = null;       // Offscreen glow sprite for mouse trails
-let _spriteColorKey = '';      // Invalidation key (theme-dependent)
-
-const _SPRITE_DIM = 64;       // Glow sprite resolution (px, square)
-
-/** Build a radial-gradient sprite on an offscreen canvas.
- *  `stops` is an array of [offset, r, g, b, a]. */
-function _makeGlowSprite(stops) {
-  const c = document.createElement('canvas');
-  c.width = _SPRITE_DIM; c.height = _SPRITE_DIM;
-  const gx = c.getContext('2d');
-  const h = _SPRITE_DIM / 2;
-  const g = gx.createRadialGradient(h, h, 0, h, h, h);
-  for (const s of stops) g.addColorStop(s[0], `rgba(${s[1]},${s[2]},${s[3]},${s[4]})`);
-  gx.fillStyle = g;
-  gx.fillRect(0, 0, _SPRITE_DIM, _SPRITE_DIM);
-  return c;
-}
-
-/** Rebuild all glow sprites when accent / ember colours change. */
-function _rebuildSprites() {
-  const key = `${acR},${acG},${acB},${emR},${emG},${emB}`;
-  if (_spriteColorKey === key) return;
-  _spriteColorKey = key;
-  _emberSprite = _makeGlowSprite([
-    [0,   emR, Math.floor(emG * .7 + 56), Math.floor(emB * .67 + 28), 1],
-    [.5,  acR, acG, acB, .375],
-    [1,   0, 0, 0, 0],
-  ]);
-  _fgSprite = _makeGlowSprite([
-    [0, acR, acG, acB, 1],
-    [1, 0, 0, 0, 0],
-  ]);
-  _trailSprite = _makeGlowSprite([
-    [0,   emR, Math.floor(emG * .94 + 10), Math.floor(emB * 1.33), 1],
-    [.4,  acR, acG, acB, .375],
-    [1,   0, 0, 0, 0],
-  ]);
-}
-
-/* ───────── Frequency bar graph (peak_32 from backend + synthesized) ───────── */
-const FREQ_BINS = 32;
-const peakHistory = new Float32Array(FREQ_BINS);
-const freqTargets = new Float32Array(FREQ_BINS);
-
-// Frequency graph AGC — tracks the loudest bin and normalizes all bars against it.
-let freqAgcPeak = 0.01;
-const FREQ_AGC_ATTACK  = 0.9;    // instantly jump to new peaks
-const FREQ_AGC_HOLD_SEC = 3;     // hold peak for this long before allowing decay
-const FREQ_AGC_RELEASE = 0.05;   // how fast peak decays after hold expires
-let freqAgcMaxHistory = [];       // [{t, v}] timestamped max-bin samples
-let freqAgcLastMaxTime = 0;
-
-// Frequency AGC floor — rolling minimum of the quietest bin
-let freqAgcFloor = 0;
-const FREQ_AGC_FLOOR_HOLD_SEC = 3;
-let freqAgcMinHistory = [];       // [{t, v}] timestamped min-bin samples
-let freqAgcLastMinTime = 0;
-
-/* ───────── Audio Level line graph with AGC ───────── */
-const LEVEL_BUF_LEN = 300;
-const levelBuffer = new Float32Array(LEVEL_BUF_LEN);  // circular buffer of RAW levels (re-normalized at draw time)
-let levelWriteIdx = 0;
-let levelSampleCount = 0;
-
-// Visual peak/floor — smoothly track actual AGC values so the graph
-// doesn't jump when the normalization range shifts.
-let visualPeak  = 0.01;
-let visualFloor = 0;
-const VISUAL_ADJUST_SPEED = 0.025;  // how fast visual range tracks actual AGC
-
-// Temporal smoothing (EMA) on the raw level fed into AGC tracking.
-// 1.0 = no smoothing (raw), lower = smoother.
-let smoothedRawLevel = 0;
-const SMOOTH_ALPHA = 0.22;
-
-// Automatic Gain Control — peak tracks the signal ceiling,
-// floor is the lowest level seen over a rolling time window.
-let agcPeak  = 0.01;   // tracks the signal ceiling
-let agcFloor = 0;       // tracks the signal floor (rolling minimum)
-const AGC_PEAK_ATTACK  = 0.9;   // peak rises to meet loud transients
-
-// Peak hold — peak instantly rises but only decays after PEAK_HOLD_SEC
-// with no new maximum (mirror of floor behavior).
-const PEAK_HOLD_SEC = 7;              // ← tune this: how long to hold the peak before allowing decay
-const AGC_PEAK_RELEASE = 0.08;        // peak decays at this rate once hold expires
-let agcPeakHistory = [];               // [{t, level}] timestamped peak samples
-let peakLastMaxTime = 0;              // timestamp of the most recent rolling max
-
-// Floor tracking — rolling minimum over FLOOR_WINDOW_SEC seconds.
-// Floor only rises when no new minimum has been recorded in the full window.
-const FLOOR_WINDOW_SEC = 7;           // ← tune this: how long to remember the minimum
-const FLOOR_MIN_DISTANCE = 0.001;     // floor must stay at least this far below peak
-let floorHistory = [];                 // [{t, level}] timestamped samples
-let floorLastMinTime = 0;             // timestamp of the most recent rolling min
-
-function updateFloor(level, now) {
-  // Push new sample
-  floorHistory.push({ t: now, v: level });
-
-  // Evict samples older than the window
-  const cutoff = now - FLOOR_WINDOW_SEC * 1000;
-  while (floorHistory.length > 0 && floorHistory[0].t < cutoff) {
-    floorHistory.shift();
-  }
-
-  // Find minimum in the window
-  let windowMin = Infinity;
-  let windowMinTime = now;
-  for (let i = 0; i < floorHistory.length; i++) {
-    if (floorHistory[i].v < windowMin) {
-      windowMin = floorHistory[i].v;
-      windowMinTime = floorHistory[i].t;
-    }
-  }
-  if (!isFinite(windowMin)) windowMin = 0;
-
-  // Floor instantly drops to new lows
-  if (windowMin <= agcFloor) {
-    agcFloor = windowMin;
-    floorLastMinTime = windowMinTime;
-  } else {
-    // Only allow floor to rise when the entire window has passed
-    // since the last recorded minimum (i.e. no new low in the full window)
-    const windowAge = now - floorLastMinTime;
-    if (windowAge >= FLOOR_WINDOW_SEC * 1000) {
-      // Jump quickly to the new window minimum
-      agcFloor = windowMin;
-      floorLastMinTime = windowMinTime;
-    }
-  }
-
-  // Guarantee floor stays meaningfully below peak (at least FLOOR_MIN_DISTANCE)
-  agcFloor = Math.min(agcFloor, agcPeak - FLOOR_MIN_DISTANCE);
-  agcFloor = Math.max(agcFloor, 0);
-}
-
-function updatePeak(level, now) {
-  // Push new sample
-  agcPeakHistory.push({ t: now, v: level });
-
-  // Evict samples older than the window
-  const cutoff = now - PEAK_HOLD_SEC * 1000;
-  while (agcPeakHistory.length > 0 && agcPeakHistory[0].t < cutoff) {
-    agcPeakHistory.shift();
-  }
-
-  // Find maximum in the window
-  let windowMax = -Infinity;
-  let windowMaxTime = now;
-  for (let i = 0; i < agcPeakHistory.length; i++) {
-    if (agcPeakHistory[i].v > windowMax) {
-      windowMax = agcPeakHistory[i].v;
-      windowMaxTime = agcPeakHistory[i].t;
-    }
-  }
-  if (!isFinite(windowMax)) windowMax = 0.01;
-
-  // Peak instantly rises to new highs
-  if (windowMax >= agcPeak) {
-    agcPeak = windowMax;
-    peakLastMaxTime = windowMaxTime;
-  } else {
-    // Only allow peak to decay when the entire hold window has passed
-    // since the last recorded maximum
-    const windowAge = now - peakLastMaxTime;
-    if (windowAge >= PEAK_HOLD_SEC * 1000) {
-      agcPeak = windowMax;
-      peakLastMaxTime = windowMaxTime;
-    }
-  }
-
-  agcPeak = Math.max(agcPeak, 0.002);
-}
-
-function agcProcess(rawLevel) {
-  const now = performance.now();
-  const level = rawLevel;
-
-  // Update AGC peak (rolling max with hold)
-  updatePeak(level, now);
-
-  // Update AGC floor (rolling minimum)
-  updateFloor(level, now);
-}
-
-function pushLevelSample(rawLevel) {
-  // Run AGC to update peak/floor tracking, but store the truly raw level
-  // so the graph can be re-normalized whenever peak/floor change.
-  agcProcess(rawLevel);
-  levelBuffer[levelWriteIdx] = rawLevel;  // no temporal smoothing on the line
-  levelWriteIdx = (levelWriteIdx + 1) % LEVEL_BUF_LEN;
-  levelSampleCount = Math.min(levelSampleCount + 1, LEVEL_BUF_LEN);
-}
-
-/* ═══════════════ HELPERS (SDK utilities) ═══════════════ */
-const fmtBytes = Sentinel.formatBytes;
-const fmtSpeed = Sentinel.formatSpeed;
-const fmtTemp  = Sentinel.formatTemp;
-const pct      = Sentinel.formatPercent;
-
-function barHTML(value, max, color) {
-  const p = max > 0 ? Math.min(100, (value / max) * 100) : 0;
-  return `<div class="bar-wrap"><div class="bar-fill" style="width:${p.toFixed(1)}%;background:${color}"></div></div>`;
-}
-
-/* ═══════════════ UI UPDATES ═══════════════ */
-const capsEl     = document.getElementById('caps');
-const keysEl     = document.getElementById('keys');
-const clockEl    = document.getElementById('clock');
-const statusPill = document.getElementById('statusPill');
-const fpsHint    = document.getElementById('fpsHint');
-const leftColEl  = document.querySelector('.left');
-const rightColEl = document.querySelector('.right');
-
-const panelLayoutDefs = [
-  { key: 'cpu',         id: 'cpuPanel',     column: 1, order: 1  },
-  { key: 'gpu',         id: 'gpuPanel',     column: 1, order: 2  },
-  { key: 'ram',         id: 'ramPanel',     column: 1, order: 3  },
-  { key: 'storage',     id: 'storagePanel', column: 1, order: 4  },
-  { key: 'network',     id: 'networkPanel', column: 1, order: 5  },
-  { key: 'power',       id: 'powerPanel',   column: 1, order: 6  },
-  { key: 'system',      id: 'systemPanel',  column: 1, order: 7  },
-  { key: 'event',       id: 'eventPanel',   column: 2, order: 1  },
-  { key: 'interactions',id: 'interPanel',   column: 2, order: 2  },
-  { key: 'keys',        id: 'keysPanel',    column: 2, order: 3  },
-  { key: 'audio',       id: 'audioPanel',   column: 2, order: 4  },
-  { key: 'wifi',        id: 'wifiPanel',    column: 2, order: 5  },
-  { key: 'bluetooth',   id: 'btPanel',      column: 2, order: 6  },
-  { key: 'media',       id: 'mediaPanel',   column: 2, order: 7  },
-  { key: 'viz',         id: 'vizPanel',     column: 2, order: 9  },
-];
-let lastPanelLayoutSignature = '';
-
-function _panelNumber(style, name, fallback, min, max) {
-  const parsed = parseFloat(style.getPropertyValue(name));
-  if (!Number.isFinite(parsed)) return fallback;
-  const lower = Number.isFinite(min) ? min : parsed;
-  const upper = Number.isFinite(max) ? max : parsed;
-  return Math.max(lower, Math.min(upper, parsed));
-}
-
-function applyPanelLayout(force) {
-  if (!leftColEl || !rightColEl) return;
-  const style = getComputedStyle(document.documentElement);
-  const computed = [];
-
-  for (const def of panelLayoutDefs) {
-    const visible = _panelNumber(style, `--panel-${def.key}-visible`, 1, 0, 1) >= 0.5;
-    const column = Math.round(_panelNumber(style, `--panel-${def.key}-column`, def.column, 1, 2));
-    const order = _panelNumber(style, `--panel-${def.key}-order`, def.order, 1, 99);
-    computed.push({ def, visible, column, order });
-  }
-
-  const signature = computed.map(c => `${c.def.key}:${c.visible ? 1 : 0}:${c.column}:${c.order}`).join('|');
-  if (!force && signature === lastPanelLayoutSignature) return;
-  lastPanelLayoutSignature = signature;
-
-  const leftItems = [];
-  const rightItems = [];
-
-  for (const item of computed) {
-    const element = document.getElementById(item.def.id);
-    if (!element) continue;
-    element.style.display = item.visible ? '' : 'none';
-    const targetList = item.column === 1 ? leftItems : rightItems;
-    targetList.push({ element, order: item.order });
-  }
-
-  leftItems.sort((a, b) => a.order - b.order);
-  rightItems.sort((a, b) => a.order - b.order);
-
-  for (const item of leftItems) leftColEl.appendChild(item.element);
-  for (const item of rightItems) rightColEl.appendChild(item.element);
-}
-
-function initCapsUI() {
-  capsEl.innerHTML = capDefs.map(c =>
-    `<div class="cap" data-c="${c.id}"><span>${c.label}</span><span class="dot"></span></div>`
-  ).join('');
-}
-
-function tickCaps() {
-  for (const c of capDefs) {
-    capLife[c.id] *= .92;
-    const el = capsEl.querySelector(`[data-c="${c.id}"]`);
-    if (!el) continue;
-    el.classList.toggle('on', capLife[c.id] > .08);
-  }
-}
-
-function addKeyChip(label, isUp) {
-  const n = document.createElement('div');
-  n.className = 'chip';
-  n.textContent = isUp ? label + ' ↑' : label + ' ↓';
-  keysEl.prepend(n);
-  while (keysEl.children.length > 12) keysEl.removeChild(keysEl.lastChild);
-  setTimeout(() => n.remove(), 900);
-}
-
-/* ─── CPU panel ─── */
-function updateCPU(c) {
-  const el = document.getElementById('cpuInfo');
-  const usage = c.usage_percent != null ? c.usage_percent : 0;
-  el.innerHTML = `
-    <div class="row"><span class="lbl">Model</span><span class="val">${c.brand || '—'}</span></div>
-    <div class="row"><span class="lbl">Cores</span><span class="val">${c.logical_cores || '—'}</span></div>
-    <div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>
-    ${barHTML(usage, 100, 'var(--cpu-bar-color)')}
-    <div class="row"><span class="lbl">Frequency</span><span class="val">${c.frequency_mhz ? c.frequency_mhz + ' MHz' : '—'}</span></div>
-    <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(c.temperature)}</span></div>
-  `;
-}
-
-/* ─── GPU panel ─── */
-function updateGPU(g) {
-  const el = document.getElementById('gpuInfo');
-  const adapters = Array.isArray(g.adapters) ? g.adapters : [];
-  const selected = adapters.length > 0
-    ? adapters
-        .slice()
-        .sort((a, b) => (Number(b.usage_percent) || 0) - (Number(a.usage_percent) || 0))[0]
-    : g;
-
-  const name = selected.name || g.name || '—';
-  const usage = selected.usage_percent != null ? selected.usage_percent : g.usage_percent;
-  const tempC = selected.temperature_c != null
-    ? selected.temperature_c
-    : (g.temperature && g.temperature.average_c != null ? g.temperature.average_c : g.temperature_c);
-  const vramUsedMb = selected.vram_used_mb != null ? selected.vram_used_mb : g.vram_used_mb;
-  const vramTotalMb = selected.vram_total_mb != null ? selected.vram_total_mb : g.vram_total_mb;
-  const vramBytes = selected.adapter_ram_bytes != null ? selected.adapter_ram_bytes : (vramTotalMb != null ? vramTotalMb * 1024 * 1024 : null);
-  const gpuClock = selected.clock_graphics_mhz != null ? selected.clock_graphics_mhz : g.clock_graphics_mhz;
-  const memClock = selected.clock_memory_mhz != null ? selected.clock_memory_mhz : g.clock_memory_mhz;
-  const power = selected.power_draw_w != null ? selected.power_draw_w : g.power_draw_w;
-  const driver = selected.driver_version || g.driver_version || '—';
-
-  let html = `
-    <div class="row"><span class="lbl">Adapter</span><span class="val">${name}</span></div>
-    <div class="row"><span class="lbl">Adapters</span><span class="val">${adapters.length || 1}</span></div>
-    <div class="row"><span class="lbl">VRAM</span><span class="val">${fmtBytes(vramBytes)}</span></div>
-    <div class="row"><span class="lbl">Driver</span><span class="val">${driver}</span></div>
-  `;
-
-  if (usage != null) {
-    html += `<div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>`;
-    html += barHTML(usage, 100, 'var(--gpu-bar-color)');
-  }
-  if (vramUsedMb != null && vramTotalMb != null) {
-    const usedBytes = vramUsedMb * 1024 * 1024;
-    const totalBytes = vramTotalMb * 1024 * 1024;
-    html += `<div class="row"><span class="lbl">VRAM Used</span><span class="val">${fmtBytes(usedBytes)} / ${fmtBytes(totalBytes)}</span></div>`;
-    html += barHTML(vramUsedMb, Math.max(vramTotalMb, 1), 'var(--vram-bar-color)');
-  }
-  html += `
-    <div class="row"><span class="lbl">Temperature</span><span class="val">${fmtTemp(tempC)}</span></div>
-    <div class="row"><span class="lbl">GPU Clock</span><span class="val">${gpuClock != null ? gpuClock + ' MHz' : '—'}</span></div>
-    <div class="row"><span class="lbl">Mem Clock</span><span class="val">${memClock != null ? memClock + ' MHz' : '—'}</span></div>
-    <div class="row"><span class="lbl">Power</span><span class="val">${power != null ? Number(power).toFixed(1) + ' W' : '—'}</span></div>
-  `;
-  el.innerHTML = html;
-}
-
-/* ─── RAM panel ─── */
-function updateRAM(r) {
-  const el = document.getElementById('ramInfo');
-  const usage = r.usage_percent != null ? r.usage_percent : 0;
-  el.innerHTML = `
-    <div class="row"><span class="lbl">Total</span><span class="val">${fmtBytes(r.total_bytes)}</span></div>
-    <div class="row"><span class="lbl">Used</span><span class="val">${fmtBytes(r.used_bytes)}</span></div>
-    <div class="row"><span class="lbl">Available</span><span class="val">${fmtBytes(r.available_bytes)}</span></div>
-    <div class="row"><span class="lbl">Usage</span><span class="val">${pct(usage)}</span></div>
-    ${barHTML(usage, 100, 'var(--ram-bar-color)')}
-    <div class="row"><span class="lbl">Swap</span><span class="val">${fmtBytes(r.swap_used_bytes)} / ${fmtBytes(r.swap_total_bytes)}</span></div>
-  `;
-}
-
-/* ─── Storage panel ─── */
-function updateStorage(s) {
-  const el = document.getElementById('storageInfo');
-  const disks = s.disks || [];
-  let html = `
-    <div class="row"><span class="lbl">Total</span><span class="val">${fmtBytes(s.total_bytes)}</span></div>
-    <div class="row"><span class="lbl">Used</span><span class="val">${fmtBytes(s.used_bytes)}</span></div>
-    ${barHTML(s.used_bytes || 0, s.total_bytes || 1, 'var(--storage-bar-color)')}
-  `;
-  for (const d of disks.slice(0, 3)) {
-    const label = d.mount || d.name || '?';
-    const pUsed = d.total_bytes > 0 ? ((d.used_bytes / d.total_bytes) * 100) : 0;
-    html += `<div class="row"><span class="lbl">${label}</span><span class="val">${fmtBytes(d.used_bytes)} / ${fmtBytes(d.total_bytes)}</span></div>`;
-    html += barHTML(pUsed, 100, 'var(--storage-pool-bar-color)');
-  }
-  el.innerHTML = html;
-}
-
-/* ─── Network panel ─── */
-function updateNetwork(n) {
-  const el = document.getElementById('networkInfo');
-  el.innerHTML = `
-    <div class="row"><span class="lbl">Download</span><span class="val">${fmtSpeed(n.received_bytes_per_second)}</span></div>
-    <div class="row"><span class="lbl">Upload</span><span class="val">${fmtSpeed(n.transmitted_bytes_per_second)}</span></div>
-    <div class="row"><span class="lbl">Total ↓</span><span class="val">${fmtBytes(n.total_received_bytes)}</span></div>
-    <div class="row"><span class="lbl">Total ↑</span><span class="val">${fmtBytes(n.total_transmitted_bytes)}</span></div>
-  `;
-}
-
-/* ─── Audio device info (right panel) ─── */
-function updateAudioStats(a) {
-  const el = document.getElementById('audioStats');
-  const out = a.output_device || {};
-  const lvl = out.levels || {};
-  el.innerHTML = `
-    <div class="row"><span class="lbl">Device</span><span class="val">${out.name || '—'}</span></div>
-    <div class="row"><span class="lbl">Volume</span><span class="val">${out.volume_percent != null ? out.volume_percent + '%' : '—'}</span></div>
-    <div class="row"><span class="lbl">Muted</span><span class="val">${out.muted ? 'Yes' : 'No'}</span></div>
-    <div class="row"><span class="lbl">Peak</span><span class="val">${lvl.peak != null ? (lvl.peak * 100).toFixed(1) + '%' : '—'}</span></div>
-    <div class="row"><span class="lbl">RMS</span><span class="val">${lvl.rms != null ? (lvl.rms * 100).toFixed(1) + '%' : '—'}</span></div>
-    ${barHTML((lvl.smoothed_peak || 0) * 100, 100, 'var(--audio-bar-color)')}
-  `;
-}
-
-/* ─── Power panel ─── */
-function updatePower(p) {
-  const el = document.getElementById('powerInfo');
-  const battery = (p && typeof p.battery === 'object') ? p.battery : null;
-  const batteryDetails = (battery && typeof battery.details === 'object') ? battery.details : null;
-
-  const pctRaw = p.battery_percent != null
-    ? p.battery_percent
-    : (battery && battery.percent != null
-      ? battery.percent
-      : (batteryDetails && batteryDetails.estimated_charge_percent != null
-        ? batteryDetails.estimated_charge_percent
-        : null));
-  const pct_val = Number.isFinite(Number(pctRaw)) ? Math.max(0, Math.min(100, Number(pctRaw))) : null;
-
-  const hasBattery = p.has_battery === true
-    || (battery && battery.present === true)
-    || pct_val != null;
-
-  const rawStatus = String(p.power_status || p.ac_status || '').toLowerCase();
-  const charging = (battery && battery.charging === true) || rawStatus === 'charging';
-  const onAcPower = rawStatus === 'online'
-    || rawStatus === 'ac'
-    || rawStatus === 'plugged'
-    || rawStatus === 'plugged_in'
-    || charging;
-  const status = onAcPower ? 'AC Power' : (hasBattery ? 'Battery' : '—');
-  const powerPlan = p.power_plan || p.plan || '—';
-  const saver = p.battery_saver === true || (battery && battery.saver_active === true);
-
-  const estimatedRuntimeMinutes = batteryDetails && Number.isFinite(Number(batteryDetails.estimated_runtime_minutes))
-    ? Number(batteryDetails.estimated_runtime_minutes)
-    : null;
-  const estimatedRuntimeSeconds = estimatedRuntimeMinutes != null && estimatedRuntimeMinutes < 1_000_000
-    ? Math.floor(estimatedRuntimeMinutes * 60)
-    : null;
-  const remainingSeconds = Number.isFinite(Number(p.remaining_seconds))
-    ? Number(p.remaining_seconds)
-    : (Number.isFinite(Number(battery && battery.lifetime_seconds))
-      ? Number(battery.lifetime_seconds)
-      : estimatedRuntimeSeconds);
-
-  let html = '';
-  if (pct_val != null) {
-    html += `<div class="row"><span class="lbl">Battery</span><span class="val">${pct_val.toFixed(0)}%</span></div>`;
-    html += barHTML(pct_val, 100, 'var(--battery-bar-color)');
-  } else if (hasBattery) {
-    html += `<div class="row"><span class="lbl">Battery</span><span class="val">Unknown</span></div>`;
-  } else {
-    html += `<div class="row"><span class="lbl">Battery</span><span class="val">N/A</span></div>`;
-  }
-
-  html += `<div class="row"><span class="lbl">Status</span><span class="val">${status}</span></div>`;
-  html += `<div class="row"><span class="lbl">Battery Saver</span><span class="val">${saver ? 'On' : 'Off'}</span></div>`;
-  html += `<div class="row"><span class="lbl">Power Plan</span><span class="val">${powerPlan}</span></div>`;
-  el.innerHTML = html;
-}
-
-/* ─── System info panel ─── */
-function updateSystem(s) {
-  const el = document.getElementById('systemInfo');
-  const os = s.os || {};
-  const osName = os.long_name || os.name || s.os_name || s.os || '—';
-  const osVersion = os.version || s.os_version || '—';
-  const user = s.username || s.user_name || s.user || '—';
-  const arch = os.cpu_arch || os.arch || s.architecture || s.arch || '—';
-  const board = s.motherboard && (s.motherboard.manufacturer || s.motherboard.product)
-    ? `${s.motherboard.manufacturer || ''} ${s.motherboard.product || ''}`.trim()
-    : '—';
-  el.innerHTML = `
-    <div class="row"><span class="lbl">Hostname</span><span class="val">${s.hostname || s.computer_name || '—'}</span></div>
-    <div class="row"><span class="lbl">OS</span><span class="val">${osName}</span></div>
-    <div class="row"><span class="lbl">Version</span><span class="val">${osVersion}</span></div>
-    <div class="row"><span class="lbl">User</span><span class="val">${user}</span></div>
-    <div class="row"><span class="lbl">Uptime</span><span class="val">${s.uptime_seconds != null ? fmtUptime(s.uptime_seconds) : '—'}</span></div>
-    <div class="row"><span class="lbl">Arch</span><span class="val">${arch}</span></div>
-    <div class="row"><span class="lbl">Board</span><span class="val">${board}</span></div>
-  `;
-}
-
-function fmtUptime(sec) {
-  if (sec == null) return '—';
-  const d = Math.floor(sec / 86400);
-  const h = Math.floor((sec % 86400) / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  let s = '';
-  if (d > 0) s += d + 'd ';
-  if (h > 0 || d > 0) s += h + 'h ';
-  s += m + 'm';
-  return s.trim();
-}
-
-/* ─── Wi-Fi panel ─── */
-function updateWifi(w) {
-  const el = document.getElementById('wifiInfo');
-  const conn = (w && typeof w.connected === 'object') ? w.connected : {};
-  const connected = w.connected === true || conn.is_connected === true || String(conn.state || '').toLowerCase() === 'connected';
-  const ssid = conn.ssid || w.ssid || conn.profile || '—';
-  const signal = conn.signal_percent != null ? conn.signal_percent : (w.signal_percent != null ? w.signal_percent : null);
-  const channel = conn.channel != null ? conn.channel : w.channel;
-  const band = conn.band || w.band;
-  const rxMbps = conn.receive_rate_mbps;
-  const txMbps = conn.transmit_rate_mbps;
-  const iface = (Array.isArray(w.interfaces) && w.interfaces.length > 0) ? w.interfaces[0] : null;
-  let html = `<div class="row"><span class="lbl">Status</span><span class="val">${connected ? 'Connected' : 'Disconnected'}</span></div>`;
-  if (connected) {
-    html += `<div class="row"><span class="lbl">SSID</span><span class="val">${ssid}</span></div>`;
-    if (signal != null) {
-      html += `<div class="row"><span class="lbl">Signal</span><span class="val">${signal}%</span></div>`;
-      html += barHTML(signal, 100, 'var(--wifi-bar-color)');
-    }
-    if (band) html += `<div class="row"><span class="lbl">Band</span><span class="val">${band}</span></div>`;
-    if (channel != null) html += `<div class="row"><span class="lbl">Channel</span><span class="val">${channel}</span></div>`;
-    if (rxMbps != null || txMbps != null) {
-      html += `<div class="row"><span class="lbl">Link</span><span class="val">${rxMbps != null ? rxMbps + '↓' : '—'} / ${txMbps != null ? txMbps + '↑' : '—'} Mbps</span></div>`;
-    }
-  } else if (iface) {
-    html += `<div class="row"><span class="lbl">Interface</span><span class="val">${iface.name || iface.description || '—'}</span></div>`;
-    html += `<div class="row"><span class="lbl">Adapter</span><span class="val">${iface.status || '—'}</span></div>`;
-  }
-  el.innerHTML = html;
-}
-
-/* ─── Bluetooth panel ─── */
-function updateBluetooth(b) {
-  const el = document.getElementById('btInfo');
-  const adapter = b.adapter || {};
-  const adapterStatus = String(adapter.status || '').toLowerCase();
-  const available = b.available === true
-    || b.enabled === true
-    || adapter.present === true
-    || adapterStatus === 'ok'
-    || adapterStatus === 'on'
-    || adapterStatus === 'up'
-    || adapterStatus === 'enabled';
-  const devicesRaw = Array.isArray(b.devices)
-    ? b.devices
-    : (Array.isArray(b.connected_devices) ? b.connected_devices : []);
-  const devices = devicesRaw
-    .map(d => {
-      if (typeof d === 'string') {
-        return { name: d, connected: false, key: d.toLowerCase() };
-      }
-      const name = d.name || d.address || '?';
-      return {
-        name,
-        connected: !!d.connected,
-        key: `${String(name).toLowerCase()}|${String(d.address || '').toLowerCase()}`
-      };
-    })
-    .sort((a, b2) => a.key.localeCompare(b2.key));
-  const connectedCount = devices.filter(d => d.connected).length;
-  let html = `<div class="row"><span class="lbl">Status</span><span class="val">${available ? 'Available' : 'Off'}</span></div>`;
-  if (adapter.name) html += `<div class="row"><span class="lbl">Adapter</span><span class="val">${adapter.name}</span></div>`;
-  if (devices.length > 0) {
-    html += `<div class="row"><span class="lbl">Devices</span><span class="val">${devices.length} (${connectedCount} connected)</span></div>`;
-    for (const d of devices.slice(0, 4)) {
-      html += `<div class="row"><span class="lbl" style="padding-left:8px">·</span><span class="val">${d.name}${d.connected ? ' (Connected)' : ''}</span></div>`;
-    }
-  } else {
-    html += `<div class="row"><span class="lbl">Devices</span><span class="val">0</span></div>`;
-  }
-  el.innerHTML = html;
-}
-
-/* ─── Idle panel ─── */
-function updateIdle(d) {
-  const el = document.getElementById('idleInfo');
-  const sec = d.idle_seconds != null ? d.idle_seconds : (d.idle_time_ms != null ? Math.floor(d.idle_time_ms / 1000) : null);
-  el.innerHTML = `
-    <div class="row"><span class="lbl">Idle Time</span><span class="val">${sec != null ? fmtUptime(sec) : '—'}</span></div>
-    <div class="row"><span class="lbl">Is Idle</span><span class="val">${d.is_idle === true ? 'Yes' : 'No'}</span></div>
-  `;
-}
-
-/* ─── Processes panel ─── */
-function updateProcesses(p) {
-  const el = document.getElementById('processInfo');
-  const total = p.total_count != null
-    ? p.total_count
-    : (p.total != null ? p.total : (p.count != null ? p.count : '—'));
-  const topCpu = (p.top_cpu || []).slice(0, 3);
-  const topMem = (p.top_memory || []).slice(0, 3);
-  let html = `<div class="row"><span class="lbl">Total</span><span class="val">${total}</span></div>`;
-  if (topCpu.length > 0) {
-    html += `<div class="row"><span class="lbl" style="color:rgba(255,130,110,.6)">Top CPU</span><span class="val"></span></div>`;
-    for (const proc of topCpu) {
-      const name = proc.name || '?';
-      const cpu = proc.cpu_percent != null ? proc.cpu_percent.toFixed(1) + '%' : '';
-      html += `<div class="row"><span class="lbl" style="padding-left:8px">${name}</span><span class="val">${cpu}</span></div>`;
-    }
-  }
-  if (topMem.length > 0) {
-    html += `<div class="row"><span class="lbl" style="color:rgba(255,130,110,.6)">Top Memory</span><span class="val"></span></div>`;
-    for (const proc of topMem) {
-      const name = proc.name || '?';
-      const mem = proc.memory_bytes != null ? fmtBytes(proc.memory_bytes) : '';
-      html += `<div class="row"><span class="lbl" style="padding-left:8px">${name}</span><span class="val">${mem}</span></div>`;
-    }
-  }
-  el.innerHTML = html;
-}
-
-const mediaSessionState = {
-  snapshot: null,
-  receivedAtPerfMs: 0,
-  basePositionMs: 0,
-  displayedPositionMs: 0,
-  sessionKey: ''
-};
-
-function mediaSessionKey(ms) {
-  if (!ms) return '';
-  const timeline = ms.timeline || {};
-  return [
-    ms.source_app_id || '',
-    ms.title || '',
-    ms.artist || '',
-    ms.album || '',
-    ms.track_number || '',
-    timeline.duration_ms || ''
-  ].join('|');
-}
-
-function mediaSessionSnapshotKey(ms) {
-  if (!ms) return '';
-  const timeline = ms.timeline || {};
-  return [
-    ms.source_app_id || '',
-    ms.title || '',
-    ms.artist || '',
-    ms.album || '',
-    String(ms.playback_status || ''),
-    ms.playing === true ? '1' : '0',
-    Number(timeline.position_ms) || 0,
-    Number(timeline.duration_ms) || 0,
-    Number(timeline.start_ms) || 0,
-    Number(timeline.end_ms) || 0,
-    Number(ms.playback_rate) || 0
-  ].join('|');
-}
-
-function shouldAllowMediaBackwardReset(ms, incomingPos, currentPos) {
-  const timeline = (ms && ms.timeline) || {};
-  const duration = Number(timeline.duration_ms) || 0;
-
-  // Track restart/loop near the end -> allow reset to beginning.
-  if (duration > 0 && currentPos > duration - 5000 && incomingPos < 5000) {
-    return true;
-  }
-
-  // Explicit seeks/jumps should still be possible when large.
-  const delta = currentPos - incomingPos;
-  return delta > 20000;
-}
-
-function mediaIsAdvancing(ms) {
-  if (!ms) return false;
-  const status = String(ms.playback_status || '').toLowerCase();
-  return ms.playing === true || status === 'playing';
-}
-
-function getRenderedMediaSession() {
-  const ms = mediaSessionState.snapshot;
-  if (!ms) return null;
-
-  const out = {
-    ...ms,
-    timeline: ms.timeline ? { ...ms.timeline } : null
-  };
-
-  if (!out.timeline || !mediaIsAdvancing(out)) {
-    if (out.timeline && Number.isFinite(out.timeline.position_ms)) {
-      mediaSessionState.displayedPositionMs = Math.max(0, Number(out.timeline.position_ms) || 0);
-    }
-    return out;
-  }
-
-  const rate = Number.isFinite(out.playback_rate) && out.playback_rate > 0
-    ? out.playback_rate
-    : 1;
-  const elapsedMs = Math.max(0, performance.now() - mediaSessionState.receivedAtPerfMs);
-  let positionMs = mediaSessionState.basePositionMs + elapsedMs * rate;
-
-  if (Number.isFinite(out.timeline.duration_ms) && out.timeline.duration_ms > 0) {
-    positionMs = Math.min(positionMs, out.timeline.duration_ms);
-  }
-  if (Number.isFinite(out.timeline.end_ms) && Number.isFinite(out.timeline.start_ms)) {
-    const maxTimelinePos = Math.max(0, out.timeline.end_ms - out.timeline.start_ms);
-    positionMs = Math.min(positionMs, maxTimelinePos);
-  }
-
-  out.timeline.position_ms = Math.max(0, positionMs);
-  mediaSessionState.displayedPositionMs = out.timeline.position_ms;
-  return out;
-}
-
-function renderMediaSession(ms) {
-  const el = document.getElementById('mediaInfo');
-  if (!el) return;
-
-  /* ── Nothing playing ── */
-  if (!ms || (ms.playing === false && !ms.title)) {
-    el.innerHTML = `<div class="media-idle">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/></svg>
-      <span>Nothing playing</span>
-    </div>`;
-    return;
-  }
-
-  const status = ms.playback_status || (ms.playing ? 'playing' : 'stopped');
-  const isPlaying = status.toLowerCase() === 'playing';
-
-  /* ── Album art ── */
-  const artHTML = ms.thumbnail
-    ? `<img class="media-art" src="${ms.thumbnail}" alt="">`
-    : `<div class="media-art-placeholder"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6Z"/></svg></div>`;
-
-  /* ── Track info ── */
-  let infoHTML = '';
-  if (ms.title)  infoHTML += `<div class="media-title">${ms.title}</div>`;
-  const artistText = ms.artist || ms.album_artist || '';
-  if (artistText) infoHTML += `<div class="media-artist">${artistText}</div>`;
-  if (ms.album && ms.album !== artistText) infoHTML += `<div class="media-album">${ms.album}</div>`;
-  infoHTML += `<div class="media-status">
-    <span class="media-status-dot${isPlaying ? ' playing' : ''}"></span>
-    <span class="media-status-label">${status}</span>
-  </div>`;
-
-  /* ── Progress bar ── */
-  let progressHTML = '';
-  if (ms.timeline && ms.timeline.duration_ms > 0) {
-    const pos = ms.timeline.position_ms || 0;
-    const dur = ms.timeline.duration_ms;
-    const pct = Math.min(100, (pos / dur) * 100);
-    progressHTML = `<div class="media-progress">
-      <div class="media-progress-bar"><div class="media-progress-fill" style="width:${pct.toFixed(1)}%"></div></div>
-      <div class="media-time"><span>${fmtTimeMs(pos)}</span><span>${fmtTimeMs(dur)}</span></div>
-    </div>`;
-  }
-
-  /* ── Meta chips ── */
-  const chips = [];
-  if (ms.source_app_id) {
-    const app = ms.source_app_id.replace(/\.exe$/i, '');
-    chips.push(`<span class="media-chip">${app}</span>`);
-  }
-  if (ms.playback_type && ms.playback_type !== 'unknown')
-    chips.push(`<span class="media-chip">${ms.playback_type}</span>`);
-  if (ms.shuffle === true)
-    chips.push(`<span class="media-chip active">shuffle</span>`);
-  if (ms.repeat_mode && ms.repeat_mode !== 'none')
-    chips.push(`<span class="media-chip active">repeat ${ms.repeat_mode}</span>`);
-  if (ms.genres && ms.genres.length)
-    chips.push(`<span class="media-chip">${ms.genres.join(', ')}</span>`);
-  if (ms.track_number)
-    chips.push(`<span class="media-chip">Track ${ms.track_number}${ms.album_track_count ? '/' + ms.album_track_count : ''}</span>`);
-  const metaHTML = chips.length ? `<div class="media-meta">${chips.join('')}</div>` : '';
-
-  /* ── Assemble ── */
-  el.innerHTML = `<div class="media-hero">${artHTML}<div class="media-info">${infoHTML}</div></div>${progressHTML}${metaHTML}`;
-}
-
-/* ─── Media session (via Sentinel.subscribe('media')) ─── */
-function updateMediaSession(nextMs) {
-  if (!nextMs) {
-    mediaSessionState.snapshot = null;
-    mediaSessionState.basePositionMs = 0;
-    mediaSessionState.displayedPositionMs = 0;
-    mediaSessionState.sessionKey = '';
-    renderMediaSession(null);
-    return;
-  }
-
-  const incomingPos = Number(nextMs.timeline && nextMs.timeline.position_ms) || 0;
-  const nextKey = mediaSessionKey(nextMs);
-  const sameSession = mediaSessionState.sessionKey && mediaSessionState.sessionKey === nextKey;
-  let basePos = incomingPos;
-
-  if (sameSession && mediaIsAdvancing(nextMs)) {
-    const floorPos = Math.max(0, Number(mediaSessionState.displayedPositionMs) || 0);
-    if (incomingPos + 1200 < floorPos && !shouldAllowMediaBackwardReset(nextMs, incomingPos, floorPos)) {
-      basePos = floorPos;
-    }
-  } else {
-    mediaSessionState.displayedPositionMs = incomingPos;
-  }
-
-  mediaSessionState.snapshot = nextMs;
-  mediaSessionState.sessionKey = nextKey;
-  mediaSessionState.receivedAtPerfMs = performance.now();
-  mediaSessionState.basePositionMs = basePos;
-
-  renderMediaSession(getRenderedMediaSession());
-}
-
-function fmtTimeMs(ms) {
-  const sec = Math.floor(ms / 1000);
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return m + ':' + (s < 10 ? '0' : '') + s;
-}
-
-/* ─── Interaction stats ─── */
-function updateInterStats() {
-  const el = document.getElementById('interStats');
-  const cur = lastMouseSnapshot && lastMouseSnapshot.cursor ? lastMouseSnapshot.cursor : null;
-  const cursorLabel = cur ? `${cur.x}, ${cur.y}` : '—';
-  const toggles = (lastKeyboardSnapshot && lastKeyboardSnapshot.toggle_states) || {};
-  const activeToggleCount =
-    (toggles.caps_lock ? 1 : 0) +
-    (toggles.num_lock ? 1 : 0) +
-    (toggles.scroll_lock ? 1 : 0) +
-    (toggles.insert ? 1 : 0);
-
-  el.innerHTML = `
-    <div class="row"><span class="lbl">Mouse Pos</span><span class="val">${(mx*100).toFixed(1)}%, ${(my*100).toFixed(1)}%</span></div>
-    <div class="row"><span class="lbl">Cursor</span><span class="val">${cursorLabel}</span></div>
-    <div class="row"><span class="lbl">Moves</span><span class="val">${moveCount}</span></div>
-    <div class="row"><span class="lbl">Clicks</span><span class="val">${clickCount}</span></div>
-    <div class="row"><span class="lbl">Keys ↓/↑</span><span class="val">${keyDownCount} / ${keyUpCount}</span></div>
-    <div class="row"><span class="lbl">Keyboard</span><span class="val">${lastKeyboardSnapshot ? (lastKeyboardSnapshot.layout_id || 'Available') : '—'}</span></div>
-    <div class="row"><span class="lbl">Toggles On</span><span class="val">${activeToggleCount}</span></div>
-    <div class="row"><span class="lbl">Held</span><span class="val">${activeKeys.size || activeToggleCount}</span></div>
-    <div class="row"><span class="lbl">Last Key</span><span class="val">${lastKey}</span></div>
-  `;
-}
-
-/* ═══════════════ SENTINEL SDK SUBSCRIPTIONS ═══════════════ */
-function stamp() { return new Date().toLocaleTimeString(); }
-
-Sentinel.subscribe('cpu',     c => updateCPU(c));
-Sentinel.subscribe('gpu',     g => updateGPU(g));
-Sentinel.subscribe('ram',     r => updateRAM(r));
-Sentinel.subscribe('storage', s => updateStorage(s));
-Sentinel.subscribe('network', n => updateNetwork(n));
-Sentinel.subscribe('audio',   a => {
-  updateAudioStats(a);
-
-  const out = (a && a.output_device) || {};
-  const lvl = (out && out.levels) || {};
-  const rawPeak = lvl.smoothed_peak != null ? lvl.smoothed_peak : (lvl.peak != null ? lvl.peak : out.audio_level);
-  const raw = Math.max(0, Math.min(1, Number(rawPeak) || 0));
-
-  audioTarget = Math.max(audioTarget * .7, Math.pow(Math.min(1, raw * 5), .55));
-  ping('audio');
-  pushLevelSample(raw);
-
-  // Frequency bars — use real FFT spectrum from backend (spectrum_32 is at root level)
-  const spectrum = a && a.spectrum_32;
-  if (spectrum && spectrum.length >= FREQ_BINS) {
-    for (let i = 0; i < FREQ_BINS; i++) {
-      freqTargets[i] = Math.max(freqTargets[i], spectrum[i]);
-    }
-  }
-});
-Sentinel.subscribe('media',  ms => updateMediaSession(ms));
-Sentinel.subscribe('power',     p => updatePower(p));
-Sentinel.subscribe('system',    s => updateSystem(s));
-Sentinel.subscribe('wifi',      w => updateWifi(w));
-Sentinel.subscribe('bluetooth', b => updateBluetooth(b));
-Sentinel.subscribe('idle',      d => updateIdle(d));
-Sentinel.subscribe('processes', p => updateProcesses(p));
-Sentinel.subscribe('mouse', m => {
-  const prevMouseSnapshot = lastMouseSnapshot;
-  lastMouseSnapshot = m || null;
-  const cursor = (m && m.cursor) || null;
-
-  if (cursor && Number.isFinite(cursor.x) && Number.isFinite(cursor.y)) {
-    // Map absolute desktop-pixel cursor to this monitor's 0–1 local space.
-    // monitorBounds is injected by the wallpaper addon on every tick BEFORE
-    // registry data, so it is always available by the time this fires.
-    // If somehow missing, skip cursor update entirely — the virtual-screen
-    // fallback would produce wrong coordinates on non-primary monitors.
-    const mb = Sentinel.monitorBounds;
-    if (!mb) return;   // bounds not yet received; wait for next tick
-
-    const nx = Math.max(0, Math.min(1, (Number(cursor.x) - mb.left) / Math.max(1, mb.width)));
-    const ny = Math.max(0, Math.min(1, (Number(cursor.y) - mb.top) / Math.max(1, mb.height)));
-
-    const moved = !prevMouseSnapshot || !prevMouseSnapshot.cursor
-      ? true
-      : (prevMouseSnapshot.cursor.x !== cursor.x || prevMouseSnapshot.cursor.y !== cursor.y);
-
-    mx = nx;
-    my = ny;
-    if (moved) {
-      moveCount++;
-      ping('move');
-      lastEvent = stamp();
-      const px = mx * W, py = my * H;
-      const last = trails.length ? trails[trails.length - 1] : null;
-      // Distance-throttle: skip points closer than 8px to avoid flooding during fast sweeps
-      if (!last || (px - last.x) * (px - last.x) + (py - last.y) * (py - last.y) > 64) {
-        trails.push({ x: px, y: py, life: 1 });
-        if (trails.length > 50) trails.length = 50;
-      }
-    }
-  }
-
-  const clicked = (m && m.events && Array.isArray(m.events.clicked)) ? m.events.clicked : [];
-  if (clicked.length > 0) {
-    clickCount += clicked.length;
-    ping('click');
-    lastEvent = stamp();
-    for (let i = 0; i < clicked.length; i++) {
-      ripples.push({ x: mx * W, y: my * H, r: 0, life: 1, hue: Math.random() * 40 });
-    }
-  }
-});
-Sentinel.subscribe('keyboard', k => {
-  const next = k && k.toggle_states ? k.toggle_states : {};
-  lastKeyboardSnapshot = k || null;
-
-  activeKeys.clear();
-  const pressed = (k && Array.isArray(k.pressed_keys)) ? k.pressed_keys : [];
-  for (const key of pressed) {
-    activeKeys.add(String(key));
-  }
-  if (pressed.length === 0) {
-    if (next.caps_lock) activeKeys.add('CapsLock');
-    if (next.num_lock) activeKeys.add('NumLock');
-    if (next.scroll_lock) activeKeys.add('ScrollLock');
-    if (next.insert) activeKeys.add('Insert');
-  }
-
-  const down = (k && k.events && Array.isArray(k.events.down)) ? k.events.down : [];
-  const up = (k && k.events && Array.isArray(k.events.up)) ? k.events.up : [];
-
-  for (const key of down) {
-    keyDownCount++;
-    lastKey = String(key);
-    lastEvent = stamp();
-    ping('keydown');
-    addKeyChip(String(key), false);
-    keyBursts.push({ x: W * (.15 + Math.random() * .7), y: H * (.15 + Math.random() * .6), life: 1, hue: Math.random() * 40 });
-  }
-
-  for (const key of up) {
-    keyUpCount++;
-    lastKey = String(key);
-    lastEvent = stamp();
-    ping('keyup');
-    addKeyChip(String(key), true);
-  }
-});
-
-Sentinel.on('registry', () => {
-  ping('registry');
-});
-
-// Audio level — feed into AGC line graph + frequency bins + visual reactivity
-Sentinel.on('pause', () => {
-  ping('pause');
-  lastEvent = stamp();
-  statusPill.textContent = 'paused';
-});
-
-Sentinel.on('resume', () => {
-  ping('pause');
-  lastEvent = stamp();
-  statusPill.textContent = 'running';
-});
-
-let lastPolledMediaSnapshotKey = '';
-
-setInterval(() => {
-  const latestMedia = Sentinel.get('media');
-  if (latestMedia) {
-    const snapshotKey = mediaSessionSnapshotKey(latestMedia);
-    if (snapshotKey !== lastPolledMediaSnapshotKey) {
-      lastPolledMediaSnapshotKey = snapshotKey;
-      updateMediaSession(latestMedia);
-    }
-  } else if (lastPolledMediaSnapshotKey !== '') {
-    lastPolledMediaSnapshotKey = '';
-    updateMediaSession(null);
-  }
-
-  if (!mediaSessionState.snapshot) return;
-  renderMediaSession(getRenderedMediaSession());
-}, 100);
-
-/* ═══════════════ DRAWING ═══════════════ */
-function resize() {
-  const prevW = W;
-  const prevH = H;
-  W = innerWidth;
-  H = innerHeight;
-  const viewportChanged = prevW !== W || prevH !== H;
-
-  if (viewportChanged || C.width !== W || C.height !== H) {
-    C.width = W;
-    C.height = H;
-    // Rebuild CRT scanline pattern and invalidate vignette cache on resize
-    const pc = document.createElement('canvas'); pc.width = 1; pc.height = 3;
-    const px = pc.getContext('2d');
-    px.fillStyle = 'rgba(0,0,0,.03)';
-    px.fillRect(0, 0, 1, 1);
-    _scanlinePat = X.createPattern(pc, 'repeat');
-    _vigW = 0; // force vignette rebuild
-  }
-
-  // Resolution-normalized HUD scaling so panel proportions remain consistent
-  // across monitor sizes (e.g. 1080p vs 1440p), with user multiplier support.
-  const rootStyle = getComputedStyle(document.documentElement);
-  const userScale = parseFloat(rootStyle.getPropertyValue('--ui-scale-multiplier'));
-  const multiplier = Number.isFinite(userScale) && userScale > 0 ? userScale : 1;
-  const autoScale = Math.min(Math.max(0.2, W / 1920), Math.max(0.2, H / 1080));
-  const finalScale = Math.max(0.2, Math.min(3, autoScale * multiplier));
-  document.documentElement.style.setProperty('--ui-scale', finalScale.toFixed(4));
-
-  // Size both canvases to the same container (they overlap)
-  const vp = FC.parentElement;
-  if (vp) {
-    const cw = vp.clientWidth;
-    const ch = vp.clientHeight;
-    if (FC.width !== cw || FC.height !== ch) {
-      FC.width = cw;
-      FC.height = ch;
-    }
-    if (LC.width !== cw || LC.height !== ch) {
-      LC.width = cw;
-      LC.height = ch;
-    }
-  }
-
-  if (!stars.length) {
-    for (let i = 0; i < 160; i++) stars.push({
-      x: Math.random() * W, y: Math.random() * H,
-      z: .1 + Math.random() * 1.3, t: Math.random() * 6.28,
-      brightness: .15 + Math.random() * .4
-    });
-  }
-
-  if (viewportChanged || !wardenNodes.length || !embers.length || !tendrils.length) {
-    // Generate warden mesh nodes
-    wardenNodes.length = 0;
-    for (let i = 0; i < WARDEN_NODE_COUNT; i++) {
-      wardenNodes.push({
-        baseX: Math.random() * W, baseY: Math.random() * H,
-        x: 0, y: 0,
-        phase: Math.random() * 6.28,
-        size: 1.5 + Math.random() * 2.5
-      });
-    }
-
-    // Generate embers
-    embers.length = 0;
-    for (let i = 0; i < EMBER_COUNT; i++) {
-      embers.push({
-        x: Math.random() * W, y: Math.random() * H,
-        vx: (Math.random() - .5) * .5, vy: -(Math.random() * .4 + .1),
-        size: .5 + Math.random() * 2.5,
-        brightness: .3 + Math.random() * .7,
-        phase: Math.random() * 6.28
-      });
-    }
-
-    // Generate guardian tendrils (bezier control points)
-    tendrils.length = 0;
-    for (let i = 0; i < TENDRIL_COUNT; i++) {
-      const angle = (i / TENDRIL_COUNT) * Math.PI * 2;
-      const len = Math.min(W, H) * (.25 + Math.random() * .2);
-      tendrils.push({
-        angle,
-        length: len,
-        phase: Math.random() * 6.28,
-        speed: .003 + Math.random() * .004,
-        amplitude: 20 + Math.random() * 40,
-        nodes: 5 + Math.floor(Math.random() * 4)
-      });
-    }
-  }
-}
-
-// ── Theme color cache (read from CSS variables once per frame) ──
-let acR = 200, acG = 50, acB = 40;
-let emR = 255, emG = 170, emB = 60;
-let uiAcR = 200, uiAcG = 50, uiAcB = 40;
-let uiEmR = 255, uiEmG = 170, uiEmB = 60;
-let bgR = 10, bgG = 4, bgB = 6;
-let lastAccentCss = '';
-let lastEmberCss = '';
-
-function _hexRgb(h) {
-  h = (h || '').replace('#', '');
-  if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
-  return [parseInt(h.substring(0,2),16)||0, parseInt(h.substring(2,4),16)||0, parseInt(h.substring(4,6),16)||0];
-}
-
-function _cssColorToRgb(value, fallback) {
-  const raw = String(value || '').trim();
-  if (!raw) return fallback;
-
-  if (raw.startsWith('#')) {
-    return _hexRgb(raw);
-  }
-
-  const rgbMatch = raw.match(/^rgba?\(([^)]+)\)$/i);
-  if (rgbMatch) {
-    const parts = rgbMatch[1].split(',').map(p => parseFloat(p.trim()));
-    if (parts.length >= 3) {
-      return [
-        Math.max(0, Math.min(255, parts[0] || 0)) | 0,
-        Math.max(0, Math.min(255, parts[1] || 0)) | 0,
-        Math.max(0, Math.min(255, parts[2] || 0)) | 0,
-      ];
-    }
-  }
-
-  return fallback;
-}
-
-function readThemeVars() {
-  const s = getComputedStyle(document.documentElement);
-  const _i = (v, d) => { const n = parseInt(v); return Number.isFinite(n) ? n : d; };
-  const accentHex = (s.getPropertyValue('--accent') || '').trim();
-  const emberHex = (s.getPropertyValue('--ember') || '').trim();
-  const sceneAccentHex = (s.getPropertyValue('--scene-accent') || '').trim();
-  const sceneEmberHex = (s.getPropertyValue('--scene-ember') || '').trim();
-
-  if (sceneAccentHex) {
-    [acR, acG, acB] = _cssColorToRgb(sceneAccentHex, [200, 50, 40]);
-  } else if (accentHex) {
-    [acR, acG, acB] = _cssColorToRgb(accentHex, [200, 50, 40]);
-  } else {
-    acR = _i(s.getPropertyValue('--accent-r'), 200);
-    acG = _i(s.getPropertyValue('--accent-g'), 50);
-    acB = _i(s.getPropertyValue('--accent-b'), 40);
-  }
-
-  if (sceneEmberHex) {
-    [emR, emG, emB] = _cssColorToRgb(sceneEmberHex, [255, 170, 60]);
-  } else if (emberHex) {
-    [emR, emG, emB] = _cssColorToRgb(emberHex, [255, 170, 60]);
-  } else {
-    emR = _i(s.getPropertyValue('--ember-r'), 255);
-    emG = _i(s.getPropertyValue('--ember-g'), 170);
-    emB = _i(s.getPropertyValue('--ember-b'), 60);
-  }
-
-  if (accentHex) {
-    [uiAcR, uiAcG, uiAcB] = _cssColorToRgb(accentHex, [200, 50, 40]);
-  } else {
-    uiAcR = _i(s.getPropertyValue('--accent-r'), 200);
-    uiAcG = _i(s.getPropertyValue('--accent-g'), 50);
-    uiAcB = _i(s.getPropertyValue('--accent-b'), 40);
-  }
-
-  if (emberHex) {
-    [uiEmR, uiEmG, uiEmB] = _cssColorToRgb(emberHex, [255, 170, 60]);
-  } else {
-    uiEmR = _i(s.getPropertyValue('--ember-r'), 255);
-    uiEmG = _i(s.getPropertyValue('--ember-g'), 170);
-    uiEmB = _i(s.getPropertyValue('--ember-b'), 60);
-  }
-
-  if (accentHex && accentHex !== lastAccentCss) {
-    const root = document.documentElement.style;
-    root.setProperty('--accent-r', String(uiAcR));
-    root.setProperty('--accent-g', String(uiAcG));
-    root.setProperty('--accent-b', String(uiAcB));
-    lastAccentCss = accentHex;
-  }
-
-  if (emberHex && emberHex !== lastEmberCss) {
-    const root = document.documentElement.style;
-    root.setProperty('--ember-r', String(uiEmR));
-    root.setProperty('--ember-g', String(uiEmG));
-    root.setProperty('--ember-b', String(uiEmB));
-    lastEmberCss = emberHex;
-  }
-
-  const bg = _hexRgb(s.getPropertyValue('--bg-color'));
-  bgR = bg[0]; bgG = bg[1]; bgB = bg[2];
-  if (!bgR && !bgG && !bgB) { bgR = 10; bgG = 4; bgB = 6; } // fallback for missing var
-
-  // Rebuild glow sprites when theme colours change
-  _rebuildSprites();
-}
-
-// Scaled accent "R,G,B" string (all channels scaled uniformly by f)
-function _a(f) { return `${Math.min(255,acR*f)|0},${Math.min(255,acG*f)|0},${Math.min(255,acB*f)|0}`; }
-// Ember "R,G,B" string (R stays at emR, G scaled by gf, B scaled by bf)
-function _e(gf, bf) { if (bf === undefined) bf = gf; return `${emR},${Math.min(255,emG*gf)|0},${Math.min(255,emB*bf)|0}`; }
-
-function drawBG() {
-  const parallaxX = (mx - .5) * 70;
-  const parallaxY = (my - .5) * 45;
-  const cx = W * .5 + parallaxX;
-  const cy = H * .46 + parallaxY;
-  breathPhase += .015;
-
-  // Deep crimson background gradient
-  const bg = X.createRadialGradient(cx, cy, 0, W * .5, H * .5, Math.max(W, H) * .85);
-  bg.addColorStop(0, `rgba(${_a(.3)},${(.35 + audio * .15).toFixed(3)})`);
-  bg.addColorStop(.3, `rgba(${_a(.15)},${(.5 + audio * .08).toFixed(3)})`);
-  bg.addColorStop(.7, `rgba(${_a(.06)},${(.75 + audio * .04).toFixed(3)})`);
-  bg.addColorStop(1, `rgb(${_a(.04)})`);
-  X.fillStyle = bg;
-  X.fillRect(0, 0, W, H);
-
-  X.globalCompositeOperation = 'screen';
-
-  // ── Diamond lattice background ──
-  const latticePx = parallaxX * .08;
-  const latticePy = parallaxY * .08;
-  const spacing = Math.max(20, parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lattice-spacing')) || 80);
-  X.strokeStyle = `rgba(${_a(.6)},${(.03 + audio * .015).toFixed(3)})`;
-  X.lineWidth = .4;
-  X.beginPath();
-  for (let i = -H; i < W + H; i += spacing) {
-    X.moveTo(i + latticePx, latticePy);
-    X.lineTo(i + H + latticePx, H + latticePy);
-    X.moveTo(i + latticePx, latticePy);
-    X.lineTo(i - H + latticePx, H + latticePy);
-  }
-  X.stroke();
-
-  // ── Star field with warm tint ──
-  for (const s of stars) {
-    s.t += .003 * s.z;
-    const sx = s.x + parallaxX * s.z * .25;
-    const sy = s.y + parallaxY * s.z * .25;
-    const twinkle = s.brightness + Math.sin(s.t + frame * .002) * .12;
-    const a = twinkle * (.1 + audio * .08);
-    const r = Math.min(255, 140 + (acR * .3 | 0) + Math.floor(s.brightness * 55));
-    const g = Math.min(255, 140 + (acG * .4 | 0) + Math.floor(s.brightness * 40));
-    const b = Math.min(255, 130 + (acB * .25 | 0) + Math.floor(s.brightness * 30));
-    X.fillStyle = `rgba(${r},${g},${b},${Math.max(0, a).toFixed(3)})`;
-    const sz = .5 + s.z * .8;
-    X.fillRect(sx, sy, sz, sz);
-  }
-
-  // ── Warden mesh (neural network) ──
-  const meshPx = parallaxX * .12;
-  const meshPy = parallaxY * .12;
-  for (const n of wardenNodes) {
-    n.phase += .01;
-    n.x = n.baseX + Math.sin(n.phase) * 25 + Math.cos(n.phase * .7) * 15;
-    n.y = n.baseY + Math.cos(n.phase * .8) * 20 + Math.sin(n.phase * .5) * 10;
-    // Audio breathing
-    const breathOffset = Math.sin(breathPhase) * 8 * audio;
-    const dx = n.x - W * .5, dy = n.y - H * .5;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const norm = dist > 1 ? 1 / dist : 1;
-    n.x += dx * norm * breathOffset;
-    n.y += dy * norm * breathOffset;
-  }
-
-  // Draw connections
-  for (let i = 0; i < wardenNodes.length; i++) {
-    const a = wardenNodes[i];
-    const ax = a.x + meshPx, ay = a.y + meshPy;
-    for (let j = i + 1; j < wardenNodes.length; j++) {
-      const b = wardenNodes[j];
-      const bx = b.x + meshPx, by = b.y + meshPy;
-      const d = Math.hypot(ax - bx, ay - by);
-      if (d < WARDEN_CONNECT_DIST) {
-        const fade = 1 - d / WARDEN_CONNECT_DIST;
-        const alpha = fade * (.06 + audio * .04);
-        X.strokeStyle = `rgba(${_a(1)},${alpha.toFixed(3)})`;
-        X.lineWidth = fade * 1.2;
-        X.beginPath(); X.moveTo(ax, ay); X.lineTo(bx, by); X.stroke();
-      }
-    }
-  }
-
-  // Draw nodes as diamonds
-  for (const n of wardenNodes) {
-    const nx = n.x + meshPx, ny = n.y + meshPy;
-    if (nx < -20 || nx > W + 20 || ny < -20 || ny > H + 20) continue;
-    const d = Math.hypot(nx - cx, ny - cy) / Math.max(W, H);
-    const fade = Math.max(0, 1 - d * 1.8);
-    if (fade < .02) continue;
-    const alpha = (.15 + audio * .1) * fade;
-    const s = n.size * (1 + audio * .3);
-    X.fillStyle = `rgba(${_a(1.1)},${alpha.toFixed(3)})`;
-    X.save();
-    X.translate(nx, ny);
-    X.rotate(Math.PI / 4);
-    X.fillRect(-s / 2, -s / 2, s, s);
-    X.restore();
-  }
-
-  // ── Ember field ──
-  for (const e of embers) {
-    e.phase += .008 + audio * .01;
-    e.x += e.vx + Math.sin(e.phase) * .4;
-    e.y += e.vy * (1 + audio * 1.5);
-    // Gentle attraction toward center
-    const dx = cx - e.x, dy = cy - e.y;
-    const d = Math.hypot(dx, dy);
-    if (d > 50) { e.x += dx / d * .08; e.y += dy / d * .08; }
-    // Wrap around
-    if (e.y < -30) { e.y = H + 30; e.x = Math.random() * W; }
-    if (e.x < -30 || e.x > W + 30) { e.x = Math.random() * W; e.y = Math.random() * H; }
-
-    const ex = e.x + parallaxX * .15;
-    const ey = e.y + parallaxY * .15;
-    const ea = e.brightness * (.12 + audio * .1);
-    // Glow — draw pre-rendered sprite instead of per-frame gradient
-    const eRad = e.size * 3;
-    X.globalAlpha = Math.min(1, ea * .8);
-    X.drawImage(_emberSprite, ex - eRad, ey - eRad, eRad * 2, eRad * 2);
-    X.globalAlpha = 1;
-    // Core dot
-    X.fillStyle = `rgba(${_e(1.18,2.5)},${(ea * 1.5).toFixed(3)})`;
-    X.fillRect(ex - .5, ey - .5, 1, 1);
-  }
-
-  // ── Heartbeat pulse spawn ──
-  if (frame % Math.max(8, Math.floor(40 - audio * 25)) === 0 && audio > .05) {
-    pulseWaves.push({ r: 10, life: 1, maxR: Math.max(W, H) * .6 });
-  }
-
-  // ── Foreground depth particles (near-camera layer) ──
-  for (const s of stars) {
-    if (s.z < 1.05) continue;
-    const sx = s.x + parallaxX * s.z * 1.25;
-    const sy = s.y + parallaxY * s.z * 1.2;
-    if (sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30) continue;
-    const twinkle = s.brightness + Math.sin(s.t + frame * .0015) * .1;
-    const alpha = Math.max(0, twinkle * (.05 + audio * .05));
-    const sr = .9 + s.z * 2.1;
-    // Draw pre-rendered glow sprite instead of per-frame gradient
-    const fgRad = sr * 2.8;
-    X.globalAlpha = Math.min(1, alpha);
-    X.drawImage(_fgSprite, sx - fgRad, sy - fgRad, fgRad * 2, fgRad * 2);
-    X.globalAlpha = 1;
-  }
-
-  X.globalCompositeOperation = 'source-over';
-}
-
-function drawCore() {
-  const cx = W * .5 + (mx - .5) * 40;
-  const cy = H * .46 + (my - .5) * 28;
-  const baseR = Math.min(W, H) * .1;
-  const r = baseR + audio * 25 + Math.sin(breathPhase) * 4;
-  const depthX = (mx - .5) * 42;
-  const depthY = (my - .5) * 24;
-  const backX = cx - depthX * .38;
-  const backY = cy - depthY * .38;
-  const frontX = cx + depthX * .28;
-  const frontY = cy + depthY * .28;
-
-  X.globalCompositeOperation = 'screen';
-
-  // ── Rear depth haze ──
-  const rear = X.createRadialGradient(backX, backY, 0, backX, backY, r * 3.8);
-  rear.addColorStop(0, `rgba(${_a(.55)},${(.08 + audio * .04).toFixed(3)})`);
-  rear.addColorStop(1, 'rgba(0,0,0,0)');
-  X.fillStyle = rear;
-  X.beginPath(); X.arc(backX, backY, r * 3.8, 0, Math.PI * 2); X.fill();
-
-  // ── Ambient glow ──
-  const g = X.createRadialGradient(cx, cy, 0, cx, cy, r * 4.5);
-  g.addColorStop(0, `rgba(${_a(.9)},${(.18 + audio * .12).toFixed(3)})`);
-  g.addColorStop(.15, `rgba(${_a(.6)},${(.1 + audio * .06).toFixed(3)})`);
-  g.addColorStop(.4, `rgba(${_a(.3)},${(.04 + audio * .02).toFixed(3)})`);
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  X.fillStyle = g;
-  X.fillRect(0, 0, W, H);
-
-  // ── Guardian tendrils (flowing bezier curves from center) ──
-  for (const t of tendrils) {
-    t.phase += t.speed * (1 + audio * 2);
-    const endDist = t.length * (1 + audio * .3 + Math.sin(breathPhase) * .05);
-    const segments = 30;
-    X.beginPath();
-    for (let s = 0; s <= segments; s++) {
-      const frac = s / segments;
-      const baseAng = t.angle + Math.sin(t.phase + frac * 3) * .15 * frac;
-      const dist = frac * endDist;
-      const wave = Math.sin(t.phase * 2 + frac * 8) * t.amplitude * frac * frac;
-      const perpAng = baseAng + Math.PI / 2;
-      const px = cx + Math.cos(baseAng) * dist + Math.cos(perpAng) * wave;
-      const py = cy + Math.sin(baseAng) * dist + Math.sin(perpAng) * wave;
-      s === 0 ? X.moveTo(px, py) : X.lineTo(px, py);
-    }
-    X.strokeStyle = `rgba(0,0,0,${(.16 + audio * .05).toFixed(3)})`;
-    X.lineWidth = 6;
-    X.stroke();
-    const tendrilAlpha = .08 + audio * .06;
-    X.strokeStyle = `rgba(${_a(1)},${tendrilAlpha.toFixed(3)})`;
-    X.lineWidth = 1.5;
-    X.stroke();
-    // Glow version
-    X.strokeStyle = `rgba(${_a(.9)},${(tendrilAlpha * .4).toFixed(3)})`;
-    X.lineWidth = 4;
-    X.stroke();
-
-    // Nodes along tendril
-    for (let s = 1; s <= t.nodes; s++) {
-      const frac = s / (t.nodes + 1);
-      const baseAng = t.angle + Math.sin(t.phase + frac * 3) * .15 * frac;
-      const dist = frac * endDist;
-      const wave = Math.sin(t.phase * 2 + frac * 8) * t.amplitude * frac * frac;
-      const perpAng = baseAng + Math.PI / 2;
-      const nx = cx + Math.cos(baseAng) * dist + Math.cos(perpAng) * wave;
-      const ny = cy + Math.sin(baseAng) * dist + Math.sin(perpAng) * wave;
-      X.fillStyle = `rgba(${_e(.59,1)},${(.15 + audio * .1).toFixed(3)})`;
-      X.beginPath(); X.arc(nx, ny, 2 + audio * 2, 0, Math.PI * 2); X.fill();
-    }
-  }
-
-  // ── Nested diamond sigil ──
-  const diamonds = [
-    { scale: .3, rot: frame * .006, width: 2, alpha: .35 },
-    { scale: .55, rot: -frame * .004, width: 1.5, alpha: .25 },
-    { scale: .85, rot: frame * .003, width: 1.2, alpha: .18 },
-    { scale: 1.2, rot: -frame * .002, width: .8, alpha: .1 },
-    { scale: 1.6, rot: frame * .0015, width: .6, alpha: .06 },
-  ];
-
-  for (const d of diamonds) {
-    const dr = r * d.scale * (1 + audio * .15);
-    const alpha = d.alpha + audio * .1;
-    X.strokeStyle = `rgba(${_a(1.1)},${alpha.toFixed(3)})`;
-    X.lineWidth = d.width;
-    X.save();
-    X.translate(cx, cy);
-    X.rotate(d.rot);
-    X.beginPath();
-    X.moveTo(0, -dr);
-    X.lineTo(dr, 0);
-    X.lineTo(0, dr);
-    X.lineTo(-dr, 0);
-    X.closePath();
-    X.stroke();
-    X.restore();
-  }
-
-  // ── Inner connecting circle ──
-  const circR = r * .45 * (1 + audio * .1);
-  X.strokeStyle = `rgba(${_a(1)},${(.12 + audio * .06).toFixed(3)})`;
-  X.lineWidth = .8;
-  X.beginPath(); X.arc(cx, cy, circR, 0, Math.PI * 2); X.stroke();
-
-  // Outer circle
-  const outerCircR = r * 1.1 * (1 + audio * .08);
-  X.strokeStyle = `rgba(${_a(.9)},${(.07 + audio * .04).toFixed(3)})`;
-  X.lineWidth = .6;
-  X.beginPath(); X.arc(cx, cy, outerCircR, 0, Math.PI * 2); X.stroke();
-
-  // ── Core pulse ──
-  const coreR = 5 + audio * 10 + Math.sin(breathPhase * 2) * 2;
-  const coreG = X.createRadialGradient(cx, cy, 0, cx, cy, coreR * 5);
-  coreG.addColorStop(0, `rgba(${_e(1.18,2.67)},${(.5 + audio * .3).toFixed(3)})`);
-  coreG.addColorStop(.15, `rgba(${_e(.47,.67)},${(.3 + audio * .2).toFixed(3)})`);
-  coreG.addColorStop(.4, `rgba(${_a(.9)},${(.1 + audio * .08).toFixed(3)})`);
-  coreG.addColorStop(1, 'rgba(0,0,0,0)');
-  X.fillStyle = coreG;
-  X.beginPath(); X.arc(cx, cy, coreR * 5, 0, Math.PI * 2); X.fill();
-  // Bright center
-  X.fillStyle = `rgba(${_e(1.41,3.67)},${(.6 + audio * .3).toFixed(3)})`;
-  X.beginPath(); X.arc(cx, cy, coreR * .4, 0, Math.PI * 2); X.fill();
-
-  // Foreground rim haze (adds literal front layer depth)
-  const front = X.createRadialGradient(frontX, frontY, 0, frontX, frontY, r * 2.9);
-  front.addColorStop(0, `rgba(${_e(.7,1.1)},${(.06 + audio * .04).toFixed(3)})`);
-  front.addColorStop(.65, 'rgba(0,0,0,0)');
-  X.fillStyle = front;
-  X.beginPath(); X.arc(frontX, frontY, r * 2.9, 0, Math.PI * 2); X.fill();
-
-  // ── Heartbeat pulse waves (diamond-shaped) ──
-  for (let i = pulseWaves.length - 1; i >= 0; i--) {
-    const pw = pulseWaves[i];
-    pw.r += (pw.maxR - pw.r) * .035;
-    pw.life -= .01;
-    if (pw.life <= 0) { pulseWaves.splice(i, 1); continue; }
-    X.strokeStyle = `rgba(${_a(1)},${(pw.life * .15).toFixed(3)})`;
-    X.lineWidth = 1.5 + pw.life * 1.5;
-    const pr = pw.r;
-    X.beginPath();
-    X.moveTo(cx, cy - pr);
-    X.lineTo(cx + pr, cy);
-    X.lineTo(cx, cy + pr);
-    X.lineTo(cx - pr, cy);
-    X.closePath();
-    X.stroke();
-  }
-
-  // ── Sentinel text arc ──
-  X.save();
-  X.translate(cx, cy);
-  X.rotate(-frame * .00045);
-  const textR = r * 1.52;
-  X.font = '11px "Segoe UI", Consolas, monospace';
-  X.fillStyle = `rgba(${_a(1)},${(.22 + audio * .12).toFixed(3)})`;
-  const label = 'SENTINEL • VIGILANT • GUARDIAN • ';
-  const charAngle = (Math.PI * 2) / label.length;
-  X.textAlign = 'center';
-  X.textBaseline = 'middle';
-  for (let i = 0; i < label.length; i++) {
-    const a = charAngle * i;
-    X.save();
-    X.rotate(a + Math.PI / 2);
-    X.fillText(label[i], 0, -textR);
-    X.restore();
-  }
-  X.restore();
-
-  X.globalCompositeOperation = 'source-over';
-
-  // ── Key bursts (diamond expand) ──
-  for (let i = keyBursts.length - 1; i >= 0; i--) {
-    const b = keyBursts[i];
-    b.life -= .018;
-    if (b.life <= 0) { keyBursts.splice(i, 1); continue; }
-    const br = (1 - b.life) * 70;
-    X.strokeStyle = `rgba(${emR},${Math.floor(emG * .47 + b.hue % 100)},${Math.floor(emB * .67 + b.hue % 60)},${(b.life * .3).toFixed(3)})`;
-    X.lineWidth = 1.5;
-    X.beginPath();
-    X.moveTo(b.x, b.y - br);
-    X.lineTo(b.x + br, b.y);
-    X.lineTo(b.x, b.y + br);
-    X.lineTo(b.x - br, b.y);
-    X.closePath(); X.stroke();
-    // Inner glow ring
-    X.strokeStyle = `rgba(${_e(.88,1.33)},${(b.life * .12).toFixed(3)})`;
-    X.lineWidth = .6;
-    X.beginPath(); X.arc(b.x, b.y, br * .5, 0, Math.PI * 2); X.stroke();
-  }
-}
-
-function drawTrailsAndRipples() {
-  // Mouse trails — ember sparks (compact-in-place instead of splice)
-  let tw = 0;
-  for (let i = 0; i < trails.length; i++) {
-    const t = trails[i];
-    t.life -= .025;
-    if (t.life > 0) trails[tw++] = t;
-  }
-  trails.length = tw;
-
-  // Draw trail glows — single globalAlpha pass to avoid per-point GPU state flushes
-  if (trails.length > 0) {
-    X.globalAlpha = .18;
-    for (let i = 0; i < trails.length; i++) {
-      const t = trails[i];
-      const tRad = 4 + (1 - t.life) * 5;
-      X.drawImage(_trailSprite, t.x - tRad, t.y - tRad, tRad * 2, tRad * 2);
-    }
-    X.globalAlpha = 1;
-  }
-
-  // Draw connecting lines as a single batched path
-  if (trails.length > 1) {
-    X.strokeStyle = `rgba(${_a(1.1)},.07)`;
-    X.lineWidth = .5;
-    X.beginPath();
-    X.moveTo(trails[0].x, trails[0].y);
-    for (let i = 1; i < trails.length; i++) {
-      X.lineTo(trails[i].x, trails[i].y);
-    }
-    X.stroke();
-  }
-
-  // Click ripples — diamond expand (compact-in-place)
-  let rw = 0;
-  for (let i = 0; i < ripples.length; i++) {
-    const r = ripples[i];
-    r.r += 4;
-    r.life -= .015;
-    if (r.life > 0) ripples[rw++] = r;
-  }
-  ripples.length = rw;
-
-  for (let i = 0; i < ripples.length; i++) {
-    const r = ripples[i];
-    X.strokeStyle = `rgba(${emR},${Math.floor(emG * .47 + r.hue % 100)},${Math.floor(emB * .67 + r.hue % 60)},${(r.life * .3).toFixed(3)})`;
-    X.lineWidth = 1.5;
-    X.beginPath();
-    X.moveTo(r.x, r.y - r.r);
-    X.lineTo(r.x + r.r, r.y);
-    X.lineTo(r.x, r.y + r.r);
-    X.lineTo(r.x - r.r, r.y);
-    X.closePath(); X.stroke();
-    X.strokeStyle = `rgba(${_e(.82,1.33)},${(r.life * .12).toFixed(3)})`;
-    X.lineWidth = .8;
-    X.beginPath(); X.arc(r.x, r.y, r.r * .55, 0, Math.PI * 2); X.stroke();
-  }
-}
-
-/* ─── Frequency Bar Graph (bottom-left) ─── */
-function drawFrequency() {
-  const cw = FC.width, ch = FC.height;
-  if (cw < 2 || ch < 2) return;
-  FX.clearRect(0, 0, cw, ch);
-
-  const n = FREQ_BINS;
-  const gap = 2;
-  const bw = (cw - gap * (n + 1)) / n;
-  const maxH = ch - 6;
-
-  for (let i = 0; i < n; i++) {
-    const raw = peakHistory[i];
-    // AGC-normalize: scale so the loudest recent bin fills the graph
-    const v = Math.min(1, raw / freqAgcPeak);
-    const bh = Math.max(1, v * maxH);
-    const x = gap + i * (bw + gap);
-    const y = ch - bh - 3;
-    const t = i / (n - 1);
-
-    // Gradient per bar — interpolate accent → ember
-    const grad = FX.createLinearGradient(x, ch - 3, x, y);
-    const fR = acR + (emR - acR) * t | 0, fG = acG + (emG - acG) * t | 0, fB = acB + (emB - acB) * t | 0;
-    grad.addColorStop(0, `rgba(${fR*.5|0},${fG*.5|0},${fB*.5|0},${(.4 + v * .5).toFixed(2)})`);
-    grad.addColorStop(1, `rgba(${Math.min(255,fR*.8|0)},${Math.min(255,fG*.8|0)},${Math.min(255,fB*.8|0)},${(.6 + v * .4).toFixed(2)})`);
-    FX.fillStyle = grad;
-
-    // Rounded-top bar
-    const r = Math.min(bw * .35, 3);
-    FX.beginPath();
-    FX.moveTo(x, ch - 3);
-    FX.lineTo(x, y + r);
-    FX.quadraticCurveTo(x, y, x + r, y);
-    FX.lineTo(x + bw - r, y);
-    FX.quadraticCurveTo(x + bw, y, x + bw, y + r);
-    FX.lineTo(x + bw, ch - 3);
-    FX.closePath();
-    FX.fill();
-
-    // Glow cap
-    if (v > 0.05) {
-      FX.fillStyle = `rgba(${Math.min(255,fR*1.1|0)},${Math.min(255,fG*1.1|0)},${Math.min(255,fB*1.1|0)},${(v * .6).toFixed(2)})`;
-      FX.fillRect(x, y, bw, Math.min(2, bh * .15));
-    }
-  }
-
-  // Subtle horizontal grid lines
-  FX.strokeStyle = `rgba(${_a(1)},.08)`;
-  FX.lineWidth = 0.5;
-  for (let i = 1; i < 4; i++) {
-    const y = (ch / 4) * i;
-    FX.beginPath(); FX.moveTo(0, y); FX.lineTo(cw, y); FX.stroke();
-  }
-
-
-}
-
-/* ─── Audio Level Line Graph with AGC (bottom-right) ─── */
-function drawLevel() {
-  const cw = LC.width, ch = LC.height;
-  if (cw < 2 || ch < 2) return;
-  LX.clearRect(0, 0, cw, ch);
-
-  // Background
-  LX.fillStyle = `rgba(${_a(.1)},.4)`;
-  LX.fillRect(0, 0, cw, ch);
-
-  // Grid lines
-  LX.strokeStyle = `rgba(${_a(1)},.08)`;
-  LX.lineWidth = 0.5;
-  for (let i = 1; i < 5; i++) {
-    const y = (ch / 5) * i;
-    LX.beginPath(); LX.moveTo(0, y); LX.lineTo(cw, y); LX.stroke();
-  }
-
-  // Draw anti-peak (5%) and peak (100%) reference lines
-  const peakY    = 3;                           // 100% = top
-  const floorY   = ch - ch * 0.05;             // 5%   = near bottom
-  const rangeY   = floorY - peakY;              // drawable range
-
-  // Anti-peak reference line (5%)
-  LX.strokeStyle = `rgba(${_e(1.06,1.33)},.15)`;;
-  LX.lineWidth = 0.5;
-  LX.setLineDash([4, 4]);
-  LX.beginPath(); LX.moveTo(0, floorY); LX.lineTo(cw, floorY); LX.stroke();
-  LX.setLineDash([]);
-
-  // Peak reference line (100%)
-  LX.strokeStyle = `rgba(${_e(.59,1)},.15)`;;
-  LX.lineWidth = 0.5;
-  LX.setLineDash([4, 4]);
-  LX.beginPath(); LX.moveTo(0, peakY); LX.lineTo(cw, peakY); LX.stroke();
-  LX.setLineDash([]);
-
-  if (levelSampleCount < 2) return;
-
-  const count = Math.min(levelSampleCount, LEVEL_BUF_LEN);
-  const stepX = cw / (count - 1);
-
-  // Build points array (read from circular buffer, oldest first)
-  const points = [];
-  // Smooth visual peak/floor so the graph doesn't stutter when AGC shifts.
-  visualPeak  += (agcPeak  - visualPeak)  * VISUAL_ADJUST_SPEED;
-  visualFloor += (agcFloor - visualFloor) * VISUAL_ADJUST_SPEED;
-  // Headroom is 0.05% of the actual signal range so the line never quite touches the top.
-  const visRange = visualPeak - visualFloor;
-  const headroom = visRange * 0.0005;
-  const drawPeak  = visualPeak + headroom;
-  const drawFloor = visualFloor;
-  const drawRange = drawPeak - drawFloor;
-  const startIdx = (levelWriteIdx - count + LEVEL_BUF_LEN) % LEVEL_BUF_LEN;
-  for (let i = 0; i < count; i++) {
-    const idx = (startIdx + i) % LEVEL_BUF_LEN;
-    const rawVal = levelBuffer[idx];
-    const norm = drawRange > 0.0001
-      ? Math.max(0, Math.min(1, (rawVal - drawFloor) / drawRange))
-      : 0;
-    const y = floorY - norm * rangeY;
-    points.push({ x: i * stepX, y });
-  }
-
-  // Filled area under the line
-  const areaGrad = LX.createLinearGradient(0, peakY, 0, floorY);
-  areaGrad.addColorStop(0, `rgba(${_a(1.1)},.18)`);
-  areaGrad.addColorStop(0.5, `rgba(${_a(.9)},.08)`);
-  areaGrad.addColorStop(1, `rgba(${_a(.6)},.02)`);
-  LX.fillStyle = areaGrad;
-  LX.beginPath();
-  LX.moveTo(points[0].x, floorY);
-  for (let i = 0; i < points.length; i++) {
-    if (i === 0) {
-      LX.lineTo(points[i].x, points[i].y);
-    } else {
-      // Smooth quadratic curves between points
-      const prev = points[i - 1];
-      const cx = (prev.x + points[i].x) / 2;
-      LX.quadraticCurveTo(prev.x, prev.y, cx, (prev.y + points[i].y) / 2);
-      if (i === points.length - 1) {
-        LX.lineTo(points[i].x, points[i].y);
-      }
-    }
-  }
-  LX.lineTo(points[points.length - 1].x, floorY);
-  LX.closePath();
-  LX.fill();
-
-  // Main line
-  const lineGrad = LX.createLinearGradient(0, 0, cw, 0);
-  lineGrad.addColorStop(0, `rgba(${_a(1)},.4)`);
-  lineGrad.addColorStop(0.5, `rgba(${_a(1.2)},.8)`);
-  lineGrad.addColorStop(1, `rgba(${_e(.76,1)},.9)`);
-  LX.strokeStyle = lineGrad;
-  LX.lineWidth = 1.8;
-  LX.lineJoin = 'round';
-  LX.lineCap = 'round';
-  LX.beginPath();
-  for (let i = 0; i < points.length; i++) {
-    if (i === 0) {
-      LX.moveTo(points[i].x, points[i].y);
-    } else {
-      const prev = points[i - 1];
-      const cx = (prev.x + points[i].x) / 2;
-      LX.quadraticCurveTo(prev.x, prev.y, cx, (prev.y + points[i].y) / 2);
-      if (i === points.length - 1) {
-        LX.lineTo(points[i].x, points[i].y);
-      }
-    }
-  }
-  LX.stroke();
-
-  // Glow line (thicker, more transparent)
-  LX.strokeStyle = `rgba(${_a(1.1)},.2)`;
-  LX.lineWidth = 4;
-  LX.beginPath();
-  for (let i = 0; i < points.length; i++) {
-    if (i === 0) {
-      LX.moveTo(points[i].x, points[i].y);
-    } else {
-      const prev = points[i - 1];
-      const cx = (prev.x + points[i].x) / 2;
-      LX.quadraticCurveTo(prev.x, prev.y, cx, (prev.y + points[i].y) / 2);
-      if (i === points.length - 1) {
-        LX.lineTo(points[i].x, points[i].y);
-      }
-    }
-  }
-  LX.stroke();
-
-  // Current value indicator (dot at the end)
-  if (points.length > 0) {
-    const last = points[points.length - 1];
-    LX.fillStyle = `rgba(${_e(.94,1.33)},.9)`;
-    LX.beginPath(); LX.arc(last.x, last.y, 3, 0, Math.PI * 2); LX.fill();
-    LX.fillStyle = `rgba(${_e(.94,1.33)},.3)`;
-    LX.beginPath(); LX.arc(last.x, last.y, 6, 0, Math.PI * 2); LX.fill();
-  }
-
-  // AGC info overlay — all four corners in dB
-  // Convert linear 0-1 to dB (clamp to -80dB minimum)
-  const _todB = v => v > 0 ? Math.max(-80, 20 * Math.log10(v)) : -80;
-  const linePeakdB  = _todB(agcPeak).toFixed(1);
-  const lineFloordB = _todB(agcFloor).toFixed(1);
-  const freqPeakdB  = _todB(freqAgcPeak).toFixed(1);
-  const freqFloordB = _todB(freqAgcFloor).toFixed(1);
-  LX.font = '8px "Segoe UI", sans-serif';
-  // Top-right: Line AGC Peak
-  LX.textAlign = 'right';
-  LX.fillStyle = 'rgba(255,255,255,.45)';
-  LX.fillText(`Line Peak: ${linePeakdB} dB`, cw - 4, 12);
-  // Bottom-right: Line AGC Floor
-  LX.fillStyle = 'rgba(255,255,255,.35)';
-  LX.fillText(`Line Floor: ${lineFloordB} dB`, cw - 4, ch - 4);
-  // Top-left: Freq AGC Peak
-  LX.textAlign = 'left';
-  LX.fillStyle = 'rgba(255,255,255,.45)';
-  LX.fillText(`Freq Peak: ${freqPeakdB} dB`, 4, 12);
-  // Bottom-left: Freq AGC Floor
-  LX.fillStyle = 'rgba(255,255,255,.35)';
-  LX.fillText(`Freq Floor: ${freqFloordB} dB`, 4, ch - 4);
-}
-
-/* ═══════════════ MAIN LOOP ═══════════════ */
-function loop(now) {
-  const dt = Math.max(1, now - lastFrameTime);
-  lastFrameTime = now;
-  fps += ((1000 / dt) - fps) * .06;
-  readThemeVars();
-
-  if (!Sentinel.paused) {
-    frame++;
-    audio += (audioTarget - audio) * .11;
-    audioTarget *= .91;
-
-    // Smooth frequency bins toward targets + decay (backend pre-smooths via EMA)
-    // Also update frequency AGC peak from the loudest bin.
-    let curMaxBin = 0;
-    for (let i = 0; i < FREQ_BINS; i++) {
-      peakHistory[i] += (freqTargets[i] - peakHistory[i]) * .45;
-      freqTargets[i] *= .88;
-      if (peakHistory[i] > curMaxBin) curMaxBin = peakHistory[i];
-    }
-    // Frequency AGC: rolling-max with hold (mirrors audio level peak tracking)
-    const fnow = performance.now();
-    freqAgcMaxHistory.push({ t: fnow, v: curMaxBin });
-    const fCutoff = fnow - FREQ_AGC_HOLD_SEC * 1000;
-    while (freqAgcMaxHistory.length > 0 && freqAgcMaxHistory[0].t < fCutoff) freqAgcMaxHistory.shift();
-    let fWindowMax = 0;
-    let fWindowMaxTime = fnow;
-    for (let j = 0; j < freqAgcMaxHistory.length; j++) {
-      if (freqAgcMaxHistory[j].v > fWindowMax) {
-        fWindowMax = freqAgcMaxHistory[j].v;
-        fWindowMaxTime = freqAgcMaxHistory[j].t;
-      }
-    }
-    if (fWindowMax >= freqAgcPeak) {
-      freqAgcPeak = fWindowMax;
-      freqAgcLastMaxTime = fWindowMaxTime;
-    } else if (fnow - freqAgcLastMaxTime >= FREQ_AGC_HOLD_SEC * 1000) {
-      freqAgcPeak += (fWindowMax - freqAgcPeak) * FREQ_AGC_RELEASE;
-    }
-    freqAgcPeak = Math.max(freqAgcPeak, 0.001);
-
-    // Frequency AGC floor: rolling-min with hold
-    // Use the minimum bin value (quietest active bin)
-    let curMinBin = Infinity;
-    for (let i = 0; i < FREQ_BINS; i++) {
-      if (peakHistory[i] < curMinBin) curMinBin = peakHistory[i];
-    }
-    if (!isFinite(curMinBin)) curMinBin = 0;
-    freqAgcMinHistory.push({ t: fnow, v: curMinBin });
-    const fFloorCutoff = fnow - FREQ_AGC_FLOOR_HOLD_SEC * 1000;
-    while (freqAgcMinHistory.length > 0 && freqAgcMinHistory[0].t < fFloorCutoff) freqAgcMinHistory.shift();
-    let fWindowMin = Infinity;
-    let fWindowMinTime = fnow;
-    for (let j = 0; j < freqAgcMinHistory.length; j++) {
-      if (freqAgcMinHistory[j].v < fWindowMin) {
-        fWindowMin = freqAgcMinHistory[j].v;
-        fWindowMinTime = freqAgcMinHistory[j].t;
-      }
-    }
-    if (!isFinite(fWindowMin)) fWindowMin = 0;
-    if (fWindowMin <= freqAgcFloor) {
-      freqAgcFloor = fWindowMin;
-      freqAgcLastMinTime = fWindowMinTime;
-    } else if (fnow - freqAgcLastMinTime >= FREQ_AGC_FLOOR_HOLD_SEC * 1000) {
-      freqAgcFloor += (fWindowMin - freqAgcFloor) * FREQ_AGC_RELEASE;
-    }
-    freqAgcFloor = Math.min(freqAgcFloor, freqAgcPeak - 0.0005);
-    freqAgcFloor = Math.max(freqAgcFloor, 0);
-  }
-
-  // Accessibility + responsiveness split:
-  // keep background calmer, but allow stronger motion in the core/tentacles.
-  const rawAudio = audio;
-  const backgroundAudioCap = 0.12;
-  const coreReactiveBoost = 1.9;
-  const coreAudioCap = 0.34;
-
-  audio = Math.min(rawAudio, backgroundAudioCap);
-  drawBG();
-
-  audio = Math.min(rawAudio * coreReactiveBoost, coreAudioCap);
-  drawCore();
-  drawTrailsAndRipples();
-
-  audio = rawAudio;
-
-  // Subtle brightness lift
-  X.globalCompositeOperation = 'screen';
-  X.fillStyle = `rgba(${_a(.8)},${(.02 + audio * .02).toFixed(3)})`;
-  X.fillRect(0, 0, W, H);
-  X.globalCompositeOperation = 'source-over';
-
-  // CRT scan lines (subtle) — single pattern fill instead of per-row rects
-  if (_scanlinePat) { X.fillStyle = _scanlinePat; X.fillRect(0, 0, W, H); }
-
-  // Vignette (cached — recreate only on resize)
-  if (_vigW !== W || _vigH !== H) {
-    _vigGrad = X.createRadialGradient(W * .5, H * .46, Math.min(W, H) * .15, W * .5, H * .46, Math.max(W, H) * .85);
-    _vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
-    _vigGrad.addColorStop(.6, 'rgba(0,0,0,.15)');
-    _vigGrad.addColorStop(1, 'rgba(0,0,0,.65)');
-    _vigW = W; _vigH = H;
-  }
-  X.fillStyle = _vigGrad;
-  X.fillRect(0, 0, W, H);
-
-  // HUD updates
-  tickCaps();
-  updateInterStats();
-  drawFrequency();
-  drawLevel();
-
-  fpsHint.textContent = 'FPS: ' + fps.toFixed(0);
-  // Clock: use time subscription data if available, else local
-  if (!window._sentinelTime) clockEl.textContent = new Date().toLocaleTimeString();
-
-  requestAnimationFrame(loop);
-}
-
-/* ─── Time subscription: display server-provided time ─── */
-Sentinel.subscribe('time', t => {
-  const parts = [];
-  if (t.hour != null && t.minute != null) {
-    const h12 = t.hour_12 != null ? t.hour_12 : ((t.hour % 12) || 12);
-    const h = String(h12).padStart(2, '0');
-    const m = String(t.minute).padStart(2, '0');
-    const s = t.second != null ? ':' + String(t.second).padStart(2, '0') : '';
-    const ms = t.millisecond != null ? '.' + String(t.millisecond).padStart(3, '0') : '';
-    const ampm = t.am_pm || (t.hour < 12 ? 'AM' : 'PM');
-    parts.push(h + ':' + m + s + ms + ' ' + ampm);
-  }
-  if (t.date_formatted) {
-    parts.push(t.date_formatted);
-  } else {
-    // Build date string from components
-    const dateStr = [t.year, t.month != null ? String(t.month).padStart(2, '0') : null, t.day != null ? String(t.day).padStart(2, '0') : null].filter(Boolean).join('-');
-    if (dateStr) parts.push(dateStr);
-  }
-  if (parts.length > 0) {
-    window._sentinelTime = true;
-    clockEl.textContent = parts.join('  ·  ');
-  }
-});
-
-/* ═══════════════ INIT ═══════════════ */
-addEventListener('resize', resize, { passive: true });
-
-// Listen for CSS variable updates from the editor preview iframe
-addEventListener('message', function(event) {
-  var data = event && event.data;
-  if (!data || typeof data !== 'object') return;
-  if (data.type === '__sentinel_set_css_var' && data.variable && data.value != null) {
-    document.documentElement.style.setProperty(data.variable, data.value);
-    if (data.variable === '--ui-scale-multiplier') resize();
-    if (
-      data.variable === '--bg-color' ||
-      data.variable === '--accent' ||
-      data.variable === '--ember' ||
-      data.variable === '--scene-accent' ||
-      data.variable === '--scene-ember'
-    ) readThemeVars();
-    if (data.variable.indexOf('--panel-') === 0) applyPanelLayout(false);
-  }
-});
-
-Sentinel.on('cssvarchange', function(vars) {
-  if (!vars || typeof vars !== 'object') return;
-  if (Object.prototype.hasOwnProperty.call(vars, '--ui-scale-multiplier')) resize();
-  if (
-    Object.prototype.hasOwnProperty.call(vars, '--bg-color') ||
-    Object.prototype.hasOwnProperty.call(vars, '--accent') ||
-    Object.prototype.hasOwnProperty.call(vars, '--ember') ||
-    Object.prototype.hasOwnProperty.call(vars, '--scene-accent') ||
-    Object.prototype.hasOwnProperty.call(vars, '--scene-ember')
-  ) {
-    readThemeVars();
-  }
-  for (var key in vars) {
-    if (!Object.prototype.hasOwnProperty.call(vars, key)) continue;
-    if (key.indexOf('--panel-') === 0) {
-      applyPanelLayout(false);
-      break;
-    }
-  }
-});
-
-// ── Preview mode: hide HUD when running as editor preview (no native data source) ──
-(function() {
-  var hasNativeChannel = !!(window.chrome && window.chrome.webview && window.chrome.webview.addEventListener);
-  var isInsideIframe = false;
-  try { isInsideIframe = (window !== window.top); } catch(e) { isInsideIframe = true; }
-
-  if (!hasNativeChannel && isInsideIframe) {
-    // We're in the editor preview iframe — hide HUD so the canvas animation is the focus
-    var hud = document.querySelector('.hud');
-    if (hud) hud.style.display = 'none';
-  }
-})();
-
-resize();
-applyPanelLayout(true);
-initCapsUI();
-requestAnimationFrame(loop);
-</script>
+  <!-- Sentinel SDK -->
+  <script src="../sentinel.js" defer>
+  </script>
+
+  <!-- Custom Script -->
+  <script src="script.js" defer>
+  </script>
 </body>
+
 </html>

@@ -1,0 +1,347 @@
+background: 
+  selector: dropdown
+  options: 
+    - name: Color
+      selector: color-picker
+      value: #000000
+    - name: Image
+      selector: file-picker
+      value: images/default.jpg
+    - name: Video
+      selector: file-picker
+      value: videos/default.mp4
+  variable: --background
+
+barColors: 
+  audioBarColor: 
+    selector: color-picker
+    value: #ff00ae
+    variable: --audio-bar-color
+  
+  barTrackColor: 
+    selector: color-picker
+    value: #3c1916
+    variable: --bar-track-color
+  
+  batteryBarColor: 
+    selector: color-picker
+    value: #ffa8ef
+    variable: --battery-bar-color
+  
+  cpuBarColor: 
+    selector: color-picker
+    value: #dc32bd
+    variable: --cpu-bar-color
+  
+  description: Customize the color of every progress bar and their shared track.
+  gpuBarColor: 
+    selector: color-picker
+    value: #dd4bc9
+    variable: --gpu-bar-color
+  
+  name: Bar Colors
+  ramBarColor: 
+    selector: color-picker
+    value: #c83298
+    variable: --ram-bar-color
+  
+  storageBarColor: 
+    selector: color-picker
+    value: #ff42ef
+    variable: --storage-bar-color
+  
+  storagePoolBarColor: 
+    selector: color-picker
+    value: #971786
+    variable: --storage-pool-bar-color
+  
+  vramBarColor: 
+    selector: color-picker
+    value: #fd7aff
+    variable: --vram-bar-color
+  
+  wifiBarColor: 
+    selector: color-picker
+    value: #c23db7
+    variable: --wifi-bar-color
+
+capChipColors:
+  name: Capability & Chip Colors
+  description: Colors for capability signals key chips and status indicators.
+
+  capActiveColor: 
+    selector: color-picker
+    value: #ff00ae
+    variable: --cap-active-color
+  capColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --cap-color
+  capDotColor: 
+    selector: color-picker
+    value: #ff00ae
+    variable: --cap-dot-color
+  chipBorderColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --chip-border-color
+  chipTextColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --chip-text-color
+
+effects:
+  name: Effects
+  description: Control some animation presentation details.
+  latticeSpacing: 
+    max: 180
+    min: 40
+    selector: slider
+    step: 2
+    value: 102
+    variable: --lattice-spacing
+
+fontSettings:
+  name: Font Settings
+  description: Customize the typography for the wallpaper HUD.
+
+  fontFamily: 
+    selector: font-picker
+    value: Arial
+    variable: --font-family
+  fontSize: 
+    max: 20
+    min: 8
+    selector: slider
+    step: 1
+    value: 12
+    variable: --font-size
+  
+hud:
+  name: HUD
+  description: Adjust overall HUD opacity and visibility of the animated scene.
+  hudOpacity:
+    max: 1
+    min: 0
+    selector: slider
+    step: 0.05
+    value: 0
+    variable: --hud-opacity
+
+layoutSettings: 
+  name: Layout
+  description: Adjust HUD and panel dimensions and spacing to your liking.
+
+  PannelGap: 
+    max: 20
+    min: 2
+    selector: slider
+    step: 1
+    value: 7
+    variable: --panel-gap
+  hudPadding: 
+    max: 28
+    min: 0
+    selector: slider
+    step: 1
+    value: 10
+    variable: --hud-padding
+  leftColumnWidth: 
+    max: 520
+    min: 220
+    selector: slider
+    step: 10
+    value: 300
+    variable: --left-col-width
+  centerColumnWidth: 
+    max: 520
+    min: 220
+    selector: slider
+    step: 10
+    value: 300
+    variable: --center-col-width
+  rightColumnWidth: 
+    max: 520
+    min: 220
+    selector: slider
+    step: 10
+    value: 300
+    variable: --right-col-width
+  uiScaleMultiplier: 
+    max: 2
+    min: 0.2
+    selector: slider
+    step: 0.05
+    value: 1
+    variable: --ui-scale-multiplier  
+
+mediaColors:
+  name: Media Colors
+  description: Color control for the media panel.
+  mediaActiveColor: 
+    selector: color-picker
+    value: #ff00ae
+    variable: --media-active-color
+  mediaAlbumColor: 
+    selector: color-picker
+    value: #af0bd0
+    variable: --media-album-color
+  mediaArtistColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --media-artist-color
+  mediaChipColor: 
+    selector: color-picker
+    value: #d9c3bf
+    variable: --media-chip-color
+  mediaIdleColor: 
+    selector: color-picker
+    value: #503C38
+    variable: --media-idle-color
+  mediaProgressEnd: 
+    selector: color-picker
+    value: #ff00ae
+    variable: --media-progress-end
+  mediaProgressStart: 
+    selector: color-picker
+    value: #ffffff
+    variable: --media-progress-start
+  mediaStatusColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --media-status-color
+  mediaTimeColor: 
+    selector: color-picker
+    value: #c0aeaa
+    variable: --media-time-color
+  mediaTitleColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --media-title-color 
+
+panelLayout:
+  name: Panel Layout
+  description: Choose which elements appear in each panel and their order.
+  left:
+    - cpu
+    - gpu
+    - memory
+    - storage
+    - network
+    - bluetooth
+    - power
+  center: []
+  right:
+    - interactions
+    - keys
+    - events
+    - displays
+    - audio
+    - media
+    - viz
+    - system
+
+panelStyle:
+  name: Panel Style
+  description: Tweak panel blur radius and border intensity.
+  BackgroundOpacity: 
+    max: 1
+    min: 0
+    selector: slider
+    step: 0.02
+    value: 0.06
+    variable: --panel-bg-opacity
+  Blur: 
+    max: 20
+    min: 0
+    selector: slider
+    step: 1
+    value: 2
+    variable: --panel-blur
+  BorderOpacity: 
+    max: 1
+    min: 0
+    selector: slider
+    step: 0.02
+    value: 0.1
+    variable: --panel-border-opacity
+  PaddingX: 
+    max: 24
+    min: 4
+    selector: slider
+    step: 1
+    value: 10
+    variable: --panel-padding-x
+  PaddingY: 
+    max: 18
+    min: 2
+    selector: slider
+    step: 1
+    value: 7
+    variable: --panel-padding-y
+  Radius: 
+    max: 24
+    min: 0
+    selector: slider
+    step: 1
+    value: 10
+    variable: --panel-radius
+  topBlur: 
+    max: 20
+    min: 0
+    selector: slider
+    step: 1
+    value: 8
+    variable: --top-blur
+  vizMinHeight: 
+    max: 300
+    min: 80
+    selector: slider
+    step: 5
+    value: 100
+    variable: --viz-min-height
+  
+sceneColors:
+  name: Scene Colors
+  description: Color the animated scene separately from HUD/panel accents.
+  sceneAccent: 
+    selector: color-picker
+    value: #ffffff
+    variable: --scene-accent
+  sceneEmber: 
+    selector: color-picker
+    value: #ff00ae
+    variable: --scene-ember
+
+textColor: 
+  selector: color-picker
+  value: #875477
+  variable: --text-color
+
+uiColors:
+  name: UI Colors
+  description: Fine-tune individual text and element colors across the HUD. 
+  clockColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --clock-color
+  headingColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --heading-color
+  hintColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --hint-color
+  labelColor: 
+    selector: color-picker
+    value: #c7c7c7
+    variable: --label-color
+  statusPillColor: 
+    selector: color-picker
+    value: #ffffff
+    variable: --status-pill-color
+  valueColor:
+    selector: color-picker
+    value: #e288c6
+    variable: --value-color

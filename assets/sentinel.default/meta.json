@@ -1,0 +1,21 @@
+{
+  "id": "sentinel.default",
+  "metadata": {
+    "author": {
+      "Ico2": "https://github.com/The-Ico2"
+    },
+    "last_updated": "2026-02-23T00:00:00Z",
+    "long_description": "A dark theme for Sentinel. This theme is designed to be easy on the eyes and provide a sleek, modern look for the Sentinel application.",
+    "preview": "preview/*",
+    "short_description": "A dark theme for Sentinel.",
+    "tags": [
+      "default",
+      "dark",
+      "theme",
+      "animated"
+    ]
+  },
+  "name": "Sentinel Default",
+  "version": "1.0.0",
+  "window_title": "Sentinel Default"
+}

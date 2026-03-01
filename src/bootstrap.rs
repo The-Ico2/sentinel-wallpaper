@@ -550,9 +550,13 @@ fn scaffold_options_assets(options_dir: &PathBuf) {
 
 // ── Bundled default wallpaper asset ──────────────────────────────────
 
-const DEFAULT_ASSET_MANIFEST: &str = include_str!("../assets/sentinel.default/manifest.json");
+const DEFAULT_ASSET_META: &str = include_str!("../assets/sentinel.default/meta.json");
+const DEFAULT_ASSET_EDIT: &[u8] = include_bytes!("../assets/sentinel.default/editable.yaml");
 const DEFAULT_ASSET_INDEX: &str = include_str!("../assets/sentinel.default/index.html");
+const DEFAULT_ASSET_CSS: &[u8] = include_bytes!("../assets/sentinel.default/style.css");
+const DEFAULT_ASSET_JS: &[u8] = include_bytes!("../assets/sentinel.default/script.js");
 const DEFAULT_ASSET_PREVIEW: &[u8] = include_bytes!("../assets/sentinel.default/preview/1.png");
+
 const SENTINEL_JS: &str = include_str!("../assets/sentinel.js");
 
 fn scaffold_default_asset() {
@@ -576,7 +580,7 @@ fn scaffold_default_asset() {
 
     let manifest_path = asset_dir.join("manifest.json");
     if !manifest_path.exists() {
-        match fs::write(&manifest_path, DEFAULT_ASSET_MANIFEST) {
+        match fs::write(&manifest_path, DEFAULT_ASSET_META) {
             Ok(_) => info!("[{}] Created default asset manifest.json", ADDON_NAME),
             Err(e) => warn!("[{}] Failed to create default asset manifest.json: {e}", ADDON_NAME),
         }

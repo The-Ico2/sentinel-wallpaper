@@ -231,7 +231,7 @@ impl WallpaperRuntime {
             .into_iter()
             .map(String::from)
             .collect(),
-            poll_interval_ms: 50,
+            poll_interval_ms: 250,
             send_heartbeats: true,
             ..Default::default()
         });
